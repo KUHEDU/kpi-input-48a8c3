@@ -414,6 +414,9 @@ td.ap.go:hover .ap-btn { border-color: #c0392b; color: #c0392b; }
 .vh-warn { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: #fdf3e1; color: #7a4e0b; line-height: 1.55; }
 .vh-spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; vertical-align: -2px; animation: vspin .8s linear infinite; } @keyframes vspin { to { transform: rotate(360deg); } }
 .pcard.vflash { box-shadow: 0 0 0 3px #8fb6ec; transition: box-shadow .4s; }
+.vh-files { display: flex; flex-direction: column; gap: 6px; margin: 12px 0 4px; } .vf { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 7px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; } .vf.ok { border-color: #c9e2bb; background: #f1f8ec; } .vf a { margin-left: auto; font-size: 12px; }
+.vch .vh-h { margin: 18px 0 4px; font-size: 14px; } .vch .vh-h small { font-weight: 500; color: var(--ink-3); font-size: 12px; }
+.vtot td { vertical-align: middle; } .vtot .vcur { color: var(--ink-3); font-size: 11.5px; } .vtot input.vov { width: 64px; padding: 3px 6px; border: 1px solid var(--line-strong); border-radius: 6px; text-align: right; font: inherit; background: var(--surface); color: var(--ink); } .vtot small.vsrc { display: block; color: var(--ink-3); font-size: 10.5px; line-height: 1.3; }
 .vh-own { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
 .vh-own > b { margin-right: 4px; }
 .vh-own label.oc { display: inline-flex; gap: 6px; align-items: center; padding: 4px 11px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); cursor: pointer; }
@@ -1161,7 +1164,9 @@ function normPlanCnt_(v) {
   return Object.keys(m).sort().map(function (k) { return k + ':' + m[k]; }).join(',');
 }
 function planCounts_(p) {
-  var o = {}; String(p['월별계획'] || '').split(',').forEach(function (x) { var i = x.lastIndexOf(':'); if (i > 0) o[x.slice(0, i)] = Number(x.slice(i + 1)); }); return o;
+  var o = {};
+  if (p && p['상시'] === 'Y') { fiscalMonths_(projYear_(p)).forEach(function (m) { o[m] = 1; }); return o; }       // 「상시」 사업은 매달 1차수(예정차수 1 고정)
+   String(p['월별계획'] || '').split(',').forEach(function (x) { var i = x.lastIndexOf(':'); if (i > 0) o[x.slice(0, i)] = Number(x.slice(i + 1)); }); return o;
 }
 /** 예정월이 아닌 달의 계획 차수는 버린다 */
 function clampPlanCnt_(p) {
@@ -1501,7 +1506,9 @@ function personalInsights2_(projects, entries, closes, config, currentYm, owner)
 }
 
 function planSet_(p) {
-  var o = {}; String(p['예정월'] || '').split(',').forEach(function (m) { if (m) o[m] = true; }); return o;
+  var o = {};
+  if (p && p['상시'] === 'Y') { fiscalMonths_(projYear_(p)).forEach(function (m) { o[m] = true; }); return o; }       // 「상시」 사업은 매달 예정
+   String(p['예정월'] || '').split(',').forEach(function (m) { if (m) o[m] = true; }); return o;
 }
 
 function normalizeProject_(p) {
@@ -2371,6 +2378,70 @@ function vAiMatch_(items, projects, examples, cfg) {
 }
 
 
+// ───────────── 교육이수현황(교육 시스템 「직원별 교육 이수 내역」) 읽기 · 월별 집계 · 전표 인원 계산
+// 사번·이름은 읽는 순간 중복 확인에만 쓰고 저장하지 않는다 (집계값과 교육명만 남긴다).
+var E_HEAD = { code: ['강좌코드'], name: ['교육명'], cat: ['교육구분'], mode: ['교육방식'], start: ['시작일자'], end: ['종료일자'], done: ['이수일자'], plan: ['교육계획서'], pid: ['사번'] };
+var E_SESSION_DAYS = 10;      // 시작~종료가 이 일수 이하면 「세션형」(강좌코드 1개 = 1차수, 달은 시작일자), 길면 「상시·장기」(달은 이수일자, 차수 없음)
+/** 시트들 중 이수 내역 표를 찾아 줄 목록으로 → { ok, rows:[{code,name,cat,mode,start,end,done,plan}], total, umbrella, dup } */
+function eduTable_(sheets) {
+  var best = null;
+  sheets.forEach(function (sh) {
+    for (var hi = 0; hi < Math.min(sh.rows.length, 40); hi++) {
+      var H = sh.rows[hi].map(function (c) { return String(c == null ? '' : c).replace(/\s+/g, '').trim(); }), cols = {}, found = 0;
+      Object.keys(E_HEAD).forEach(function (k) { for (var a = 0; a < E_HEAD[k].length && cols[k] === undefined; a++) { var ix = H.indexOf(E_HEAD[k][a]); if (ix >= 0) { cols[k] = ix; found++; } } });
+      if (cols.code !== undefined && cols.name !== undefined && cols.start !== undefined && cols.done !== undefined && (!best || found > best.found)) best = { sheet: sh, hi: hi, cols: cols, found: found };
+    }
+  });
+  if (!best) return { ok: false, rows: [] };
+  var C = best.cols, rows = [], seen = {}, umbrella = 0, dup = 0;
+  for (var r = best.hi + 1; r < best.sheet.rows.length; r++) {
+    var row = best.sheet.rows[r], g = function (k) { return C[k] === undefined ? '' : row[C[k]]; };
+    var name = String(g('name') == null ? '' : g('name')).replace(/\s+/g, ' ').trim(); if (!name) continue;
+    if (/이수관리용/.test(name)) { umbrella++; continue; }                          // 행정용 일괄 이수 기록: 인원이 부풀기 때문에 뺀다
+    var code = String(g('code') == null ? '' : g('code')).trim(), who = String(g('pid') == null ? '' : g('pid')).trim();
+    if (who) { var k = code + '|' + who; if (seen[k]) { dup++; continue; } seen[k] = 1; }
+    rows.push({ code: code || name, name: name, cat: String(g('cat') || '').trim(), mode: String(g('mode') || '').trim(), start: vDate_(g('start')), end: vDate_(g('end')), done: vDate_(g('done')), plan: String(g('plan') || '').trim() });
+  }
+  return { ok: true, rows: rows, total: rows.length, umbrella: umbrella, dup: dup, sheet: best.sheet.name };
+}
+function eduDays_(a, b) { var x = Date.parse(a), y = Date.parse(b); return isFinite(x) && isFinite(y) ? Math.round((y - x) / 86400000) : 0; }
+/** 그 달에 속하는 과정(강좌코드 단위) 목록: 세션형은 시작일자의 달 전체, 상시·장기는 이수일자가 그 달인 줄만 → [{kind, code, rows}] */
+function eduMonth_(rows, ym) {
+  var by = {}, order = [], out = [];
+  rows.forEach(function (r) { if (!by[r.code]) { by[r.code] = []; order.push(r.code); } by[r.code].push(r); });
+  order.forEach(function (code) {
+    var rs = by[code], s0 = rs.map(function (r) { return r.start; }).filter(String).sort()[0] || '', e0 = rs.map(function (r) { return r.end; }).filter(String).sort().pop() || '';
+    var session = !s0 || !e0 || eduDays_(s0, e0) <= E_SESSION_DAYS;
+    if (session) { var sm = (s0 || rs[0].done || '').slice(0, 7); if (sm === ym) out.push({ kind: 'session', code: code, rows: rs }); }
+    else { var mine = rs.filter(function (r) { return String(r.done).slice(0, 7) === ym; }); if (mine.length) out.push({ kind: 'ongoing', code: code, rows: mine }); }
+  });
+  return out;
+}
+/** 회차 번호·날짜를 뗀 교육명: 같은 교육의 여러 차수를 한 줄로 묶는 열쇠 */
+function eduBase_(s) {
+  return String(s == null ? '' : s).replace(/[\(（][^\)）]*\d[^\)）]*[\)）]/g, ' ').replace(/제?\s*\d+\s*(?:차수|차|회|기)(?![가-힣])/g, ' ').replace(/\s+/g, ' ').trim();
+}
+/** 과정들을 같은 교육(계획서+이름)끼리 묶고 vMatchGroups_ 가 바로 쓸 수 있는 묶음으로 만든다. persons=이수 인원(줄 수), sessions=세션형 과정 수 */
+function eduGroups_(courses) {
+  var map = {}, list = [];
+  courses.forEach(function (c) {
+    var f = c.rows[0], base = eduBase_(f.name), sig = 'E:' + (f.plan || '-') + '|' + vSig_(base), g = map[sig];
+    if (!g) { g = map[sig] = { key: sig, text: base, ai: '', budget: f.cat, sig: sig, kws: vKwFlags_(base), rows: [], amount: 0, persons: 0, sessions: 0, codes: 0, plan: f.plan, cat: f.cat, mode: f.mode, session: 0, ongoing: 0 }; list.push(g); }
+    g.persons += c.rows.length; g.codes++;
+    if (c.kind === 'session') { g.sessions++; g.session += c.rows.length; } else g.ongoing += c.rows.length;
+  });
+  return list;
+}
+/** 전표 한 줄의 인원: 기재사항 괄호 안에 쉼표로 이어 쓴 이름 목록이 있으면 그 이름 수, 없으면 1 (받는 사람 1명 = 1줄). 이름 자체는 읽지 않고 개수만 센다 */
+function vPeople_(clean) {
+  var best = 1, ms = String(clean == null ? '' : clean).match(/[\(（][^\)）]*[\)）]/g) || [];
+  ms.forEach(function (x) {
+    var inner = x.slice(1, -1); if (!/[,，、]/.test(inner)) return;
+    var k = inner.split(/[,，、]/).filter(function (t) { return /[가-힣]/.test(t); }).length; if (k > best) best = k;
+  });
+  return best;
+}
+
 
 // ═════════════════════════════ 데이터 계층 (공유 db) — 화면 코드가 호출하는 api 와 같은 이름
 // 컬렉션: config/main · projects/<사업ID> · entries/<YYYY-MM>_<사업ID> · closes/<YYYY-MM>_<담당자번호>
@@ -2935,17 +3006,21 @@ var api = {
   function vchFetch(u, o) { return window.fetch(u, o); }
   function vchPrj(id) { return VCH.projects.filter(function (p) { return p.id === id; })[0] || null; }
 
-  // 팀 전체 전표를 올려도 된다: 담당자를 골라 그 담당자의 사업에 비용을 넣는다. 내 사업은 화면 칸을 채운 뒤 [저장]으로, 다른 담당자 사업은 확인을 거쳐 바로 저장한다(그 담당자 화면에는 없으므로).
+  // 그 달의 「전표」와 「교육이수현황」 엑셀(둘 다 또는 하나)을 올리면 사업별 비용·인원·차수를 종합해 채운다. 파일은 브라우저 안에서만 읽는다.
+  //  · 비용 = 전표 / 인원·차수 = 교육이수현황 (원외 직무·보수교육은 전표의 줄 수가 인원, 차수는 건드리지 않음)
+  //  · 「상시」 사업은 차수를 매달 1로 고정하고 인원만 넣는다 / 세션형 교육은 강좌코드 수가 차수
+  // 팀 전체 자료를 올려도 된다: 담당자를 골라 그 담당자의 사업에 넣는다. 내 사업은 화면 칸을 채운 뒤 [저장]으로, 다른 담당자 사업은 확인을 거쳐 바로 저장한다(그 담당자 화면에는 없으므로).
   function openVoucher() {
     if (!confirmLeave()) return;
     var owners = (S.init.owners || []).slice();
     Promise.all([call('apiVoucherSetup'), call('apiListProjects')].concat(owners.map(function (o) { return call('apiGetMonth', o, S.ym).catch(function () { return null; }); }))).then(function (r) {
       var mon = {}; owners.forEach(function (o, i) { var m = r[2 + i]; if (!m) return; var by = {}; (m.items || []).forEach(function (it) { by[it.project['사업ID']] = it.entry; }); mon[o] = { submitted: !!m.submitted, by: by }; });
-      VCH = { setup: r[0], ym: S.ym, stage: 'pick', file: null, groups: null, aiCache: {}, aiOn: false, aiMsg: '', exclUn: false, mode: 'replace', remember: true, owners: owners, month: mon, sel: {},
-        projects: r[1].filter(function (p) { return p['사용'] === 'Y'; }).map(function (p) { return { id: p['사업ID'], name: p['사업명'], cat: p['교육구분'], sub: p['세부구분'], owner: p['담당자'], mine: p['담당자'] === S.owner, cost: p['단위'] !== '지표' && p['비용행'] === 'Y' }; }) };
+      VCH = { setup: r[0], ym: S.ym, stage: 'pick', file: null, edu: null, eduGroups: null, groups: null, aiCache: {}, aiOn: false, aiMsg: '', exclUn: false, mode: 'replace', remember: true, owners: owners, month: mon, sel: {}, ov: {},
+        projects: r[1].filter(function (p) { return p['사용'] === 'Y'; }).map(function (p) { return { id: p['사업ID'], name: p['사업명'], cat: p['교육구분'], sub: p['세부구분'], owner: p['담당자'], mine: p['담당자'] === S.owner, cost: p['단위'] !== '지표' && p['비용행'] === 'Y',
+          ppl: p['단위'] !== '지표' && p['인원행'] === 'Y', cnt: p['단위'] !== '지표', always: p['상시'] === 'Y', ext: /원외\s*(직무|보수)교육/.test(String(p['사업명'])) }; }) };
       VCH.sel[S.owner] = true;                                          // 처음에는 내 것만 선택 — 다른 담당자는 직접 골라야 입력된다
       VCH.aiOn = !!vchKey() && !!vchCfg().consent;
-      $('#dlgTitle').textContent = '🧾 전표로 비용 채우기 · ' + ymLabel(S.ym); $('#dlgErr').textContent = '';
+      $('#dlgTitle').textContent = '🧾 전표·교육이수로 실적 채우기 · ' + ymLabel(S.ym); $('#dlgErr').textContent = '';
       renderVoucher(); $('#dlg').classList.add('show');
       $('#dlgSave').onclick = applyVoucher;
     }).catch(function (e) { toast('전표 기능을 열지 못했습니다: ' + ((e && e.message) || e), true); });
@@ -2960,55 +3035,72 @@ var api = {
       '<p class="vh-warn">· <b>무료 등급은 보낸 내용을 구글이 서비스 개선에 쓰거나 사람이 검토할 수 있습니다.</b> 그래서 받는 사람 이름·계좌·금액·날짜·괄호 안 내용을 뺀 「기재사항·예산명」 문구만 보냅니다 (환자 정보는 보내지 않습니다).<br>· 시트에 저장하면 시트 주소를 가진 사람은 누구나 키를 볼 수 있습니다. 필요하면 AI Studio 에서 키를 폐기하세요.</p></div></details>';
   }
 
+  function vchFileChips() {                                         // 올린 파일 표시 (종류는 내용으로 자동 판별)
+    var V = VCH, h = '';
+    if (V.file) { var inm = V.file.rows.filter(function (r) { return r.ym === V.ym; }).length; h += '<span class="vf ok">✓ <b>전표</b> ' + esc(V.file.name) + ' · ' + esc(ymLabel(V.ym)) + ' ' + n(inm) + '줄' + (V.file.rows.length - inm ? ' <small>(다른 달 ' + n(V.file.rows.length - inm) + '줄)</small>' : '') + ' <a href="#" data-rm="file">빼기</a></span>'; }
+    if (V.edu) { h += '<span class="vf ok">✓ <b>교육이수현황</b> ' + esc(V.edu.name) + ' · 이수 내역 ' + n(V.edu.total) + '줄' + (V.edu.umbrella ? ' <small>(일괄 이수 기록 ' + n(V.edu.umbrella) + '줄 제외)</small>' : '') + ' <a href="#" data-rm="edu">빼기</a></span>'; }
+    return h;
+  }
   function renderVoucher() {
     var body = $('#dlgBody'), V = VCH;
     if (V.stage === 'pick') {
+      var chips = vchFileChips();
       body.innerHTML = '<div class="vch">' +
-        '<div class="vh-drop" id="vDrop"><b>전표 엑셀 파일</b>을 여기에 끌어다 놓거나 <button type="button" class="btn sm primary" id="vPick">파일 고르기</button>' +
-        '<small>ERP 「교육팀 전표」를 그대로 (.xls · .xlsx · .csv). 파일은 이 브라우저 안에서만 읽고 어디에도 올리지 않습니다.</small><input type="file" id="vFile" accept=".xls,.xlsx,.csv,.txt,.htm,.html" hidden></div>' +
-        '<ul class="vh-how"><li>그 달(' + esc(ymLabel(V.ym)) + ') 전표의 <b>기재사항·예산명</b>을 사업명과 비교해 알맞은 사업을 찾습니다. <b>팀 전체 전표를 올려도 됩니다</b> — 담당자별로 나뉘어 매칭됩니다.</li><li>같은 문구는 한 줄로 묶어 보여 드리고, 확신이 낮은 줄은 노란색·붉은색으로 표시합니다. <b>고쳐서</b> 쓸 수 있습니다.</li><li>다음 화면에서 <b>어느 담당자의 비용을 입력할지 고릅니다</b>(처음에는 내 것만 선택). 내 사업은 비용 칸이 채워지고 <b>[저장]</b>을 눌러야 반영되며, 선택한 다른 담당자의 사업은 확인 후 바로 저장됩니다.</li></ul>' + vchAiPanel() + '</div>';
+        '<div class="vh-drop" id="vDrop"><b>그 달의 전표·교육이수현황 엑셀</b>을 여기에 끌어다 놓거나 <button type="button" class="btn sm primary" id="vPick">파일 고르기</button>' +
+        '<small>두 파일을 함께(또는 하나만) 올릴 수 있고, 종류는 자동으로 알아봅니다. ERP 「교육팀 전표」(.xls · .xlsx · .csv)와 교육 시스템 「직원별 교육 이수 내역」(.xlsx). 파일은 이 브라우저 안에서만 읽고 어디에도 올리지 않으며, 사번·이름은 저장하지 않습니다.</small><input type="file" id="vFile" accept=".xls,.xlsx,.csv,.txt,.htm,.html" multiple hidden></div>' +
+        (chips ? '<div class="vh-files" id="vFiles">' + chips + '</div><div style="margin:10px 0"><button type="button" class="btn primary" id="vGo">' + (V.file && V.edu ? '두 파일로 확인 화면 열기' : '이 파일로 확인 화면 열기' + (V.file ? ' (교육이수현황도 올리면 인원·차수까지 채웁니다)' : ' (전표도 올리면 비용까지 채웁니다)')) + '</button></div>' : '') +
+        '<ul class="vh-how"><li>그 달(' + esc(ymLabel(V.ym)) + ')의 <b>전표</b>에서는 비용을, <b>교육이수현황</b>에서는 인원·차수를 가져와 <b>사업별로 종합</b>합니다. 원외 직무·보수교육은 전표의 줄 수가 인원입니다(차수는 그대로).</li>' +
+        '<li><b>「상시」로 체크된 사업</b>은 차수를 매달 1로 고정하고 인원만 채웁니다. 세션형 교육(CPR·KALS 등)은 강좌코드 하나가 1차수이며 시작일자 기준의 달에 들어갑니다.</li>' +
+        '<li>같은 문구는 한 줄로 묶어 보여 드리고, 확신이 낮은 줄은 노란색·붉은색으로 표시합니다. <b>고쳐서</b> 쓸 수 있습니다. 팀 전체 자료를 올려도 되며, 다음 화면에서 <b>어느 담당자의 것을 입력할지 고릅니다</b>(처음에는 내 것만). 내 사업은 칸이 채워진 뒤 <b>[저장]</b>을 눌러야 반영되고, 선택한 다른 담당자 사업은 확인 후 바로 저장됩니다.</li></ul>' + vchAiPanel() + '</div>';
       $('#dlgSave').textContent = '비용 칸에 채우기'; $('#dlgSave').disabled = true;
       var pick = $('#vPick', body), file = $('#vFile', body), drop = $('#vDrop', body);
       pick.addEventListener('click', function () { file.click(); });
-      file.addEventListener('change', function () { if (file.files[0]) vchLoad(file.files[0]); });
+      file.addEventListener('change', function () { if (file.files.length) vchLoadFiles([].slice.call(file.files)); });
       ['dragover', 'dragenter'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
       ['dragleave', 'drop'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
-      drop.addEventListener('drop', function (e) { var f = e.dataTransfer && e.dataTransfer.files[0]; if (f) vchLoad(f); });
+      drop.addEventListener('drop', function (e) { var fl = e.dataTransfer && e.dataTransfer.files; if (fl && fl.length) vchLoadFiles([].slice.call(fl)); });
+      var go = $('#vGo', body); if (go) go.addEventListener('click', function () { V.stage = 'review'; vchBuild(); });
+      $$('#vFiles [data-rm]', body).forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); V[a.dataset.rm] = null; renderVoucher(); }); });
       vchBindAi(body); return;
     }
     // ── 확인 화면
-    var g = V.groups, cnt = { auto: 0, check: 0, none: 0 }, rowsN = 0, amt = 0;
+    var g = V.groups || [], cnt = { auto: 0, check: 0, none: 0 }, rowsN = 0, amt = 0;
     g.forEach(function (x) { cnt[vchLevel(x)] += x.rows.length; rowsN += x.rows.length; amt += x.amount; });
-    var info = V.file, others = Object.keys(info.byMonth).filter(function (m) { return m !== V.ym; }).sort();
+    var info = V.file, others = info ? Object.keys(info.byMonth).filter(function (m) { return m !== V.ym; }).sort() : [], eg = V.eduGroups || [], ec = { auto: 0, check: 0, none: 0 }, ep = 0, es = 0;
+    eg.forEach(function (x) { ec[vchLevel(x)]++; ep += x.persons; es += x.sessions; });
     body.innerHTML = '<div class="vch">' +
-      '<div class="vh-file"><b>' + esc(info.name) + '</b> · 전표 비용 ' + n(info.total) + '줄' + (info.skipped ? ' (상대 분개 ' + n(info.skipped) + '줄 제외)' : '') + ' · <b>' + esc(ymLabel(V.ym)) + ' ' + n(rowsN) + '줄 ' + n(amt) + '원</b>' +
-        (others.length ? ' <span class="muted">· 다른 달: ' + others.map(function (m) { return esc(m.slice(2)) + ' ' + info.byMonth[m] + '줄'; }).join(', ') + ' (이 달만 사용)</span>' : '') +
-        ' <button type="button" class="btn sm" id="vAgain">다른 파일</button></div>' +
-      (info.unapproved ? '<label class="vh-chk"><input type="checkbox" id="vUn"' + (V.exclUn ? ' checked' : '') + '> 결재 미승인 전표 ' + n(info.unapproved) + '건 제외</label>' : '') +
+      (info ? '<div class="vh-file"><b>전표</b> ' + esc(info.name) + ' · 비용 ' + n(info.total) + '줄' + (info.skipped ? ' (상대 분개 ' + n(info.skipped) + '줄 제외)' : '') + ' · <b>' + esc(ymLabel(V.ym)) + ' ' + n(rowsN) + '줄 ' + n(amt) + '원</b>' +
+        (others.length ? ' <span class="muted">· 다른 달: ' + others.map(function (m) { return esc(m.slice(2)) + ' ' + info.byMonth[m] + '줄'; }).join(', ') + ' (이 달만 사용)</span>' : '') + '</div>' : '') +
+      (V.edu ? '<div class="vh-file"><b>교육이수현황</b> ' + esc(V.edu.name) + ' · 이수 내역 ' + n(V.edu.total) + '줄' + (V.edu.umbrella ? ' (일괄 이수 기록 ' + n(V.edu.umbrella) + '줄 제외)' : '') + ' · <b>' + esc(ymLabel(V.ym)) + ' 교육 ' + n(eg.length) + '묶음 · 이수 ' + n(ep) + '명 · 세션 ' + n(es) + '개</b></div>' : '') +
+      '<div class="vh-file"><button type="button" class="btn sm" id="vAgain">파일 다시 고르기</button></div>' +
+      (info && info.unapproved ? '<label class="vh-chk"><input type="checkbox" id="vUn"' + (V.exclUn ? ' checked' : '') + '> 결재 미승인 전표 ' + n(info.unapproved) + '건 제외</label>' : '') +
       vchOwnPanel() +
-      '<div class="vh-sum"><span class="vs ok"><i></i>자동 ' + n(cnt.auto) + '줄</span><span class="vs mid"><i></i>확인 필요 ' + n(cnt.check) + '줄</span><span class="vs bad"><i></i>못 찾음 ' + n(cnt.none) + '줄</span><span class="vh-aimsg" id="vAiMsg"></span></div>' +
-      '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>기재사항 (교육명 단서)</th><th class="r">건</th><th class="r">금액(원)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="vBody"></tbody></table></div>' +
+      (info ? '<h4 class="vh-h">전표 → 비용 <small>(원외 직무·보수교육은 줄 수가 인원)</small></h4><div class="vh-sum" id="vSumV"><span class="vs ok"><i></i>자동 ' + n(cnt.auto) + '줄</span><span class="vs mid"><i></i>확인 필요 ' + n(cnt.check) + '줄</span><span class="vs bad"><i></i>못 찾음 ' + n(cnt.none) + '줄</span><span class="vh-aimsg" id="vAiMsg"></span></div>' +
+        '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>기재사항 (교육명 단서)</th><th class="r">건</th><th class="r">금액(원)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="vBody"></tbody></table></div>' : '') +
+      (V.edu ? '<h4 class="vh-h">교육이수현황 → 인원·차수 <small>(세션형은 강좌코드 1개 = 1차수, 달은 시작일자 · 상시·장기 과정은 이수일자의 달에 인원만)</small></h4><div class="vh-sum" id="vSumE"><span class="vs ok"><i></i>자동 ' + n(ec.auto) + '묶음</span><span class="vs mid"><i></i>확인 필요 ' + n(ec.check) + '묶음</span><span class="vs bad"><i></i>못 찾음 ' + n(ec.none) + '묶음</span></div>' +
+        '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>교육 (계획서 · 교육구분)</th><th class="r">차수</th><th class="r">인원(명)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="eBody"></tbody></table></div>' : '') +
       '<div class="vh-tot" id="vTot"></div>' +
-      '<div class="vh-opt"><span>이미 입력된 비용 칸은</span><label><input type="radio" name="vMode" value="replace"' + (V.mode === 'replace' ? ' checked' : '') + '> 전표 합계로 <b>바꾸기</b></label><label><input type="radio" name="vMode" value="add"' + (V.mode === 'add' ? ' checked' : '') + '> 전표 합계를 <b>더하기</b></label>' +
+      '<div class="vh-opt"><span>이미 입력된 값은</span><label><input type="radio" name="vMode" value="replace"' + (V.mode === 'replace' ? ' checked' : '') + '> 이번 값으로 <b>바꾸기</b></label><label><input type="radio" name="vMode" value="add"' + (V.mode === 'add' ? ' checked' : '') + '> 이번 값을 <b>더하기</b></label>' +
         '<label class="vh-chk" style="margin-left:auto"><input type="checkbox" id="vRem"' + (V.remember ? ' checked' : '') + '> 이번 매칭을 기억해 다음 달부터 자동으로 쓰기 (노란색 줄은 맞게 확인했을 때만)</label>' + (V.setup.mem.length ? '<a href="#" id="vForget">기억 ' + V.setup.mem.length + '건 지우기</a>' : '') + '</div>' +
       vchAiPanel() + '</div>';
-    $('#dlgSave').textContent = '비용 칸에 채우기';
-    $('#vAgain', body).addEventListener('click', function () { V.stage = 'pick'; V.groups = null; renderVoucher(); });
+    $('#dlgSave').textContent = '채우기';
+    $('#vAgain', body).addEventListener('click', function () { V.stage = 'pick'; V.groups = null; V.eduGroups = null; renderVoucher(); });
     var un = $('#vUn', body); if (un) un.addEventListener('change', function () { V.exclUn = un.checked; vchBuild(); });
     $$('input[name="vMode"]', body).forEach(function (r) { r.addEventListener('change', function () { V.mode = r.value; vchTotals(); }); });
     $('#vRem', body).addEventListener('change', function (e) { V.remember = e.target.checked; });
-    var fg = $('#vForget', body); if (fg) fg.addEventListener('click', function (e) { e.preventDefault(); if (!confirm('이전에 확인한 매칭 기억 ' + V.setup.mem.length + '건을 모두 지울까요? (전표 매칭이 처음 상태로 돌아갑니다)')) return; call('apiSaveVoucherMem', [], true).then(function () { V.setup.mem = []; V.aiCache = {}; vchBuild(); toast('기억을 지웠습니다.'); }); });
-    vchBindAi(body); vchOwnBind(body); vchRows(); vchTotals();
+    var fg = $('#vForget', body); if (fg) fg.addEventListener('click', function (e) { e.preventDefault(); if (!confirm('이전에 확인한 매칭 기억 ' + V.setup.mem.length + '건을 모두 지울까요? (전표·교육이수 매칭이 처음 상태로 돌아갑니다)')) return; call('apiSaveVoucherMem', [], true).then(function () { V.setup.mem = []; V.aiCache = {}; vchBuild(); toast('기억을 지웠습니다.'); }); });
+    vchBindAi(body); vchOwnBind(body); vchRows(); vchEduRows(); vchTotals();
   }
 
   // ── 담당자 선택: 어느 담당자의 비용을 입력할지 고른다 (이 전표에서 그 담당자 사업으로 매칭된 건수·금액과 지금 상태를 보여 준다)
   function vchOwnList() {                                           // 나 → 다른 담당자(시트 순서) → 그 밖(담당자 목록에 없는 사업 담당)
     var V = VCH, list = [S.owner], seen = {}; seen[S.owner] = true;
     V.owners.concat(V.projects.map(function (p) { return p.owner; })).forEach(function (o) { if (o && !seen[o]) { seen[o] = true; list.push(o); } });
-    return list.filter(function (o) { return V.projects.some(function (p) { return p.owner === o && p.cost; }); });
+    return list.filter(function (o) { return V.projects.some(function (p) { return p.owner === o && (p.cost || p.ppl || p.cnt); }); });
   }
   function vchOwnStat() {                                           // 담당자별: 매칭된 사업 수·금액
-    var st = {}; VCH.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (!p || !p.cost) return; var s = st[p.owner] || (st[p.owner] = { ids: {}, amt: 0 }); s.ids[p.id] = true; s.amt += g.amount; });
+    var st = {}, plan = vchCalc(true);
+    Object.keys(plan).forEach(function (id) { var q = plan[id], s = st[q.p.owner] || (st[q.p.owner] = { n: 0, cost: 0, ppl: 0 }); s.n++; s.cost += q.cost || 0; s.ppl += q.ppl || 0; });
     return st;
   }
   function vchOwnPanel() {
@@ -3027,33 +3119,34 @@ var api = {
   function vchOwnUpdate() {                                         // 선택·매칭이 바뀔 때마다 담당자별 건수·금액 표시를 갱신
     var st = vchOwnStat();
     $$('#vOwn label.oc').forEach(function (l) {
-      var o = l.dataset.own, s = st[o], k = s ? Object.keys(s.ids).length : 0;
-      $('.os', l).textContent = k ? k + '개 사업 · ' + n(s.amt) + '원' : '매칭 없음';
+      var o = l.dataset.own, s = st[o], k = s ? s.n : 0;
+      $('.os', l).textContent = k ? k + '개 사업' + (s.cost ? ' · ' + n(s.cost) + '원' : '') + (s.ppl ? ' · ' + n(s.ppl) + '명' : '') : '매칭 없음';
       l.classList.toggle('on', !!VCH.sel[o]); l.classList.toggle('zero', !k);
     });
   }
 
   function vchOptions(g) {
-    var V = VCH, opt = function (p) { var off = !p.cost; return '<option value="' + esc(p.id) + '"' + (g.pick === p.id ? ' selected' : '') + (off && g.pick !== p.id ? ' disabled' : '') + '>' + esc(p.name) + (off ? ' (비용 입력 꺼짐)' : '') + '</option>'; };
-    return '<option value="">(제외 — 이 줄은 넣지 않음)</option>' + vchOwnList().concat(V.projects.filter(function (p) { return !p.cost; }).map(function (p) { return p.owner; })).filter(function (o, i, a) { return a.indexOf(o) === i; }).map(function (o) {
+    var V = VCH, edu = g.persons !== undefined, opt = function (p) { var off = edu ? !(p.ppl || p.cnt) : !p.cost; return '<option value="' + esc(p.id) + '"' + (g.pick === p.id ? ' selected' : '') + (off && g.pick !== p.id ? ' disabled' : '') + '>' + esc(p.name) + (off ? (edu ? ' (입력 칸 없음)' : ' (비용 입력 꺼짐)') : '') + (p.ext && edu ? ' (전표로 계산)' : '') + '</option>'; };
+    return '<option value="">(제외 — 이 줄은 넣지 않음)</option>' + vchOwnList().concat(V.projects.filter(function (p) { return edu ? !(p.ppl || p.cnt) : !p.cost; }).map(function (p) { return p.owner; })).filter(function (o, i, a) { return a.indexOf(o) === i; }).map(function (o) {
       var ps = V.projects.filter(function (p) { return p.owner === o; }); if (!ps.length) return '';
       return '<optgroup label="' + esc(o === S.owner ? '내 사업' : o + ' 사업') + '">' + ps.map(opt).join('') + '</optgroup>';
     }).join('');
   }
   function vchBadge(g) {
     if (!g.pick) return g.user ? '<span class="vb none">제외함</span>' : '<span class="vb none">찾지 못함</span>';
-    var p = vchPrj(g.pick), t = !p ? '' : !p.cost ? ' · 비용 입력 꺼짐' : !VCH.sel[p.owner] ? ' · ' + p.owner + ' 선택 안 함' : '';
+    var edu = g.persons !== undefined, p = vchPrj(g.pick), t = !p ? '' : edu ? (p.ext ? ' · 전표로 계산(여기서는 제외)' : !(p.ppl || p.cnt) ? ' · 입력 칸 없음' : !VCH.sel[p.owner] ? ' · ' + p.owner + ' 선택 안 함' : '') : !p.cost ? ' · 비용 입력 꺼짐' : !VCH.sel[p.owner] ? ' · ' + p.owner + ' 선택 안 함' : '';
     var src = g.user ? '<span class="vb user">직접 선택</span>' : g.src === 'memory' ? '<span class="vb mem">이전에 확인함</span>' : g.src === 'ai' ? '<span class="vb ai">AI ' + Math.round(g.conf * 100) + '%</span>' : '<span class="vb rule">추정 ' + Math.round(g.conf * 100) + '%</span>';
     return src + (t ? '<span class="vb warn">' + esc(t.slice(3)) + '</span>' : '');
   }
   function vchLevel(g) { return !g.pick ? 'none' : g.user ? 'auto' : g.level === 'none' ? 'check' : g.level; }
   function vchSum() {
+    if (!VCH.groups) return;
     var cnt = { auto: 0, check: 0, none: 0 }; VCH.groups.forEach(function (x) { cnt[vchLevel(x)] += x.rows.length; });
-    var put = function (cls, label, v) { var e = $('.vs.' + cls); if (e) e.innerHTML = '<i></i>' + label + ' ' + n(v) + '줄'; };
+    var put = function (cls, label, v) { var e = $('.vs.' + cls, $('#vSumV')); if (e) e.innerHTML = '<i></i>' + label + ' ' + n(v) + '줄'; };
     put('ok', '자동', cnt.auto); put('mid', '확인 필요', cnt.check); put('bad', '못 찾음', cnt.none);
   }
   function vchRows() {
-    var V = VCH, order = { none: 0, check: 1, auto: 2 };
+    var V = VCH, order = { none: 0, check: 1, auto: 2 }; if (!V.groups || !$('#vBody')) return;
     V.groups.sort(function (a, b) { return order[vchLevel(a)] - order[vchLevel(b)] || b.amount - a.amount; });
     $('#vBody').innerHTML = V.groups.map(function (g, i) {
       var lv = vchLevel(g);
@@ -3063,45 +3156,109 @@ var api = {
     vchSum();
     $$('#vBody select').forEach(function (s) { s.addEventListener('change', function () { var g = V.groups[+s.dataset.g]; g.pick = s.value; g.user = true; g.src = 'user'; vchRows(); vchTotals(); }); });
   }
-  function vchSums() {                                              // 입력 대상 = 선택한 담당자의 비용 입력 가능한 사업
-    var sums = {}; VCH.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (p && p.cost && VCH.sel[p.owner]) sums[p.id] = (sums[p.id] || 0) + g.amount; });
-    return sums;
+  function vchEduRows() {
+    var V = VCH, g = V.eduGroups, order = { none: 0, check: 1, auto: 2 }; if (!g || !$('#eBody')) return;
+    g.sort(function (a, b) { return order[vchLevel(a)] - order[vchLevel(b)] || b.persons - a.persons; });
+    $('#eBody').innerHTML = g.map(function (x, i) {
+      var lv = vchLevel(x);
+      return '<tr class="lv-' + lv + '"><td class="dot"><i></i></td><td class="tx" title="' + esc(x.text) + '"><div>' + esc(x.text) + '</div><small>' + esc([x.plan, x.cat, x.mode, x.codes > 1 ? '과정 ' + x.codes + '개' : ''].filter(String).join(' · ')) + '</small></td>' +
+        '<td class="r num">' + (x.sessions ? x.sessions : '—') + '</td><td class="r num">' + n(x.persons) + '</td><td><select data-e="' + i + '">' + vchOptions(x) + '</select></td><td class="bd">' + vchBadge(x) + '</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="empty">이 달에 해당하는 교육 이수 내역이 없습니다.</td></tr>';
+    var ec = { auto: 0, check: 0, none: 0 }; g.forEach(function (x) { ec[vchLevel(x)]++; });
+    [['ok', '자동', ec.auto], ['mid', '확인 필요', ec.check], ['bad', '못 찾음', ec.none]].forEach(function (a) { var e = $('.vs.' + a[0], $('#vSumE')); if (e) e.innerHTML = '<i></i>' + a[1] + ' ' + n(a[2]) + '묶음'; });
+    $$('#eBody select').forEach(function (s) { s.addEventListener('change', function () { var x = V.eduGroups[+s.dataset.e]; x.pick = s.value; x.user = true; x.src = 'user'; vchEduRows(); vchTotals(); }); });
   }
-  function vchCur(p) {                                              // 그 사업 비용 칸의 지금 값 (내 사업은 화면 칸, 다른 담당자는 시트에 저장된 값)
+  // 사업별로 채울 값을 두 파일에서 종합한다 → { 사업id: { p, cost, ppl, cnt, fin:{절대값}, src:{} } }. all 이 참이면 담당자 선택과 무관하게(담당자 패널의 건수 표시용)
+  //  · 비용 = 전표 줄 금액 합  · 인원 = 원외 직무·보수교육은 전표 줄 수(이름 목록은 이름 수), 그 밖은 교육이수현황의 이수 인원
+  //  · 차수 = 「상시」 사업은 1 고정(값이 있는 달), 그 밖은 세션형 교육의 강좌코드 수 (원외 직무·보수교육은 건드리지 않음)
+  function vchCalc(all) {
+    var V = VCH, plan = {}, ok = function (p) { return all || V.sel[p.owner]; };
+    var P = function (p) { return plan[p.id] || (plan[p.id] = { p: p, fin: {}, src: {} }); };
+    (V.groups || []).forEach(function (g) {
+      var p = g.pick && vchPrj(g.pick); if (!p || !ok(p)) return;
+      if (p.cost) { var q = P(p); q.cost = (q.cost || 0) + g.amount; q.src.cost = '전표'; }
+      if (p.ext && p.ppl) { var q2 = P(p); q2.ppl = (q2.ppl || 0) + g.rows.reduce(function (s, r) { return s + vPeople_(r.clean); }, 0); q2.src.ppl = '전표 줄 수'; }
+    });
+    (V.eduGroups || []).forEach(function (x) {
+      var p = x.pick && vchPrj(x.pick); if (!p || p.ext || !ok(p)) return;
+      if (p.ppl) { var q = P(p); q.ppl = (q.ppl || 0) + x.persons; q.src.ppl = '이수'; }
+      if (p.cnt && !p.always && x.sessions) { var q3 = P(p); q3.cnt = (q3.cnt || 0) + x.sessions; q3.src.cnt = '세션 수'; }
+    });
+    Object.keys(plan).forEach(function (id) {
+      var q = plan[id], p = q.p;
+      if (p.always && p.cnt && ((q.cost || 0) > 0 || (q.ppl || 0) > 0)) { q.fin.cnt = 1; q.src.cnt = '상시 1 고정'; }
+      var o = V.ov[id]; if (o && !all) { ['cnt', 'ppl'].forEach(function (f) { if (o[f] !== undefined) { q.fin[f] = o[f]; q.src[f] = '직접 입력'; } }); }
+    });
+    if (!all) Object.keys(V.ov).forEach(function (id) {               // 계산값이 없는 사업에도 직접 입력한 값은 반영
+      var p = vchPrj(id), o = V.ov[id]; if (!p || !V.sel[p.owner] || plan[id]) return;
+      var q = P(p); ['cnt', 'ppl'].forEach(function (f) { if (o[f] !== undefined) { q.fin[f] = o[f]; q.src[f] = '직접 입력'; } });
+    });
+    return plan;
+  }
+  var VF = { cnt: ['차수', 'f-cnt'], ppl: ['인원', 'f-ppl'], cost: ['비용', 'f-cost'] };
+  function vchCur(p, f) {                                           // 그 사업 칸의 지금 값 (내 사업은 화면 칸, 다른 담당자는 시트에 저장된 값)
     var c = '';
-    if (p.mine) { var card = $$('.pcard').filter(function (x) { return x.dataset.id === p.id; })[0], inp = card && $('.f-cost', card); c = inp ? parseNum(inp.value) : ''; }
-    else { var m = VCH.month[p.owner], e = m && m.by[p.id]; c = e ? Number(e['비용']) : ''; }
+    if (p.mine) { var card = $$('.pcard').filter(function (x) { return x.dataset.id === p.id; })[0], inp = card && $('.' + VF[f][1], card); c = inp ? parseNum(inp.value) : ''; }
+    else { var m = VCH.month[p.owner], e = m && m.by[p.id]; c = e ? Number(e[VF[f][0]]) : ''; }
     return typeof c === 'number' && isFinite(c) && c > 0 ? c : '';
   }
+  function vchFinal(q, f, cur) {                                    // 칸에 실제로 들어갈 값 (바꾸기/더하기 반영). 값이 없으면 undefined
+    if (q.fin && q.fin[f] !== undefined) return q.fin[f];
+    if (q[f] === undefined) return undefined;
+    return (VCH.mode === 'add' && cur ? cur : 0) + q[f];
+  }
+  function vchSums() { return vchCalc(); }
   function vchTotals() {
-    var V = VCH, sums = vchSums(), ids = Object.keys(sums), skipped = 0, el = $('#vTot'); if (!el) return;
-    V.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (!p || !p.cost || !V.sel[p.owner]) skipped += g.amount; });
-    ids.sort(function (a, b) { var pa = vchPrj(a), pb = vchPrj(b); return (pb.mine - pa.mine) || (pa.owner < pb.owner ? -1 : pa.owner > pb.owner ? 1 : 0); });
+    var V = VCH, plan = vchCalc(), ids = Object.keys(plan), el = $('#vTot'); if (!el) return;
+    var skipped = 0; (V.groups || []).forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (!p || !p.cost || !V.sel[p.owner]) skipped += g.amount; });
+    ids = ids.filter(function (id) { var q = plan[id]; return ['cnt', 'ppl', 'cost'].some(function (f) { return vchFinal(q, f, vchCur(q.p, f)) !== undefined; }); });
+    ids.sort(function (a, b) { var pa = plan[a].p, pb = plan[b].p; return (pb.mine - pa.mine) || (pa.owner < pb.owner ? -1 : pa.owner > pb.owner ? 1 : 0); });
     var others = 0;
     var rows = ids.map(function (id) {
-      var p = vchPrj(id), cur = vchCur(p), nv = (V.mode === 'add' && cur ? cur : 0) + sums[id]; if (!p.mine) others++;
-      return '<tr><td>' + esc(p.owner) + (p.mine ? ' (나)' : '') + '</td><td>' + esc(p.name) + '</td><td class="r num">' + (cur ? n(cur) : '—') + '</td><td class="r num"><b>' + n(nv) + '</b></td><td>' + (p.mine ? '<span class="vb rule">칸만 채움 · 저장 필요</span>' : '<span class="vb user">바로 저장</span>') + '</td></tr>';
+      var q = plan[id], p = q.p; if (!p.mine) others++;
+      var cells = ['cnt', 'ppl', 'cost'].map(function (f) {
+        var cur = vchCur(p, f), nv = vchFinal(q, f, cur), can = f === 'cost' ? false : (f === 'cnt' ? p.cnt : p.ppl);
+        if (nv === undefined && !can) return '<td class="r num">—</td>';
+        var val = f === 'cost' ? '<b>' + (nv === undefined ? '—' : n(nv)) + '</b>' : '<input class="vov" data-id="' + esc(id) + '" data-f="' + f + '" inputmode="numeric" value="' + (nv === undefined ? '' : nv) + '" aria-label="' + esc(p.name + ' ' + VF[f][0]) + '">';
+        return '<td class="r num"><span class="vcur">' + (cur ? n(cur) : '—') + ' →</span> ' + val + (q.src[f] ? '<small class="vsrc">' + esc(q.src[f]) + '</small>' : '') + '</td>';
+      }).join('');
+      return '<tr><td>' + esc(p.owner) + (p.mine ? ' (나)' : '') + '</td><td>' + esc(p.name) + '</td>' + cells + '<td>' + (p.mine ? '<span class="vb rule">칸만 채움 · 저장 필요</span>' : '<span class="vb user">바로 저장</span>') + '</td></tr>';
     }).join('');
-    el.innerHTML = '<h4>사업별로 채워질 비용 <small>(원)</small></h4>' + (rows ? '<table class="vtot"><thead><tr><th>담당자</th><th>사업</th><th class="r">지금 입력값</th><th class="r">채운 뒤</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="muted">채울 사업이 없습니다. 위에서 입력할 담당자와 매칭 사업을 골라 주세요.</div>') +
-      (skipped ? '<div class="muted small">넣지 않는 금액 ' + n(skipped) + '원 (제외·찾지 못함·선택하지 않은 담당자·비용 입력 꺼짐)</div>' : '');
+    el.innerHTML = '<h4>사업별로 채워질 실적 <small>(지금 입력값 → 채운 뒤 · 차수·인원은 직접 고칠 수 있습니다)</small></h4>' + (rows ? '<table class="vtot"><thead><tr><th>담당자</th><th>사업</th><th class="r">차수</th><th class="r">인원(명)</th><th class="r">비용(원)</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="muted">채울 사업이 없습니다. 위에서 입력할 담당자와 매칭 사업을 골라 주세요.</div>') +
+      (skipped ? '<div class="muted small">넣지 않는 전표 금액 ' + n(skipped) + '원 (제외·찾지 못함·선택하지 않은 담당자·비용 입력 꺼짐)</div>' : '');
+    $$('input.vov', el).forEach(function (i) { i.addEventListener('change', function () {
+      var t = i.value.trim(), o = V.ov[i.dataset.id] || (V.ov[i.dataset.id] = {});
+      if (t === '') delete o[i.dataset.f]; else { var v = parseNum(t); if (typeof v !== 'number' || isNaN(v) || v < 0 || v % 1) { toast('0 이상의 정수를 입력하세요.', true); } else o[i.dataset.f] = v; }
+      vchTotals();
+    }); });
     $('#dlgSave').disabled = !ids.length;
-    $('#dlgSave').textContent = others ? '채우기 (다른 담당자 ' + others + '건은 바로 저장)' : '비용 칸에 채우기';
+    $('#dlgSave').textContent = others ? '채우기 (다른 담당자 ' + others + '건은 바로 저장)' : '채우기';
     vchOwnUpdate();
   }
 
-  function vchLoad(file) {
-    var V = VCH; $('#dlgErr').textContent = '';
+  function vchLoadFiles(files) {                                    // 전표·교육이수현황 파일을 읽어 종류를 자동으로 알아본다 (한 번에 두 개도 가능)
+    var V = VCH, many = files.length > 1, errs = [], chain = Promise.resolve(); $('#dlgErr').textContent = '';
     $('#dlgBody').insertAdjacentHTML('afterbegin', '<div class="loading" id="vLoading">파일을 읽는 중…</div>');
-    file.arrayBuffer().then(function (buf) { return vReadFile_(buf); }).then(function (sheets) {
-      var t = vTable_(sheets); if (!t.ok) throw new Error(t.error);
-      var byMonth = {}; t.rows.forEach(function (r) { byMonth[r.ym || '날짜없음'] = (byMonth[r.ym || '날짜없음'] || 0) + 1; });
-      V.file = { name: file.name, rows: t.rows, total: t.rows.length, skipped: t.skipped, byMonth: byMonth, unapproved: t.rows.filter(function (r) { return r.ym === V.ym && /미/.test(r.approved || ''); }).length };
-      V.stage = 'review'; vchBuild();
-    }).catch(function (e) { var l = $('#vLoading'); if (l) l.remove(); $('#dlgErr').textContent = '파일을 읽지 못했습니다: ' + ((e && e.message) || e); });
+    files.forEach(function (file) {
+      chain = chain.then(function () { return file.arrayBuffer(); }).then(function (buf) { return vReadFile_(buf); }).then(function (sheets) {
+        var et = eduTable_(sheets);
+        if (et.ok && et.total) { V.edu = { name: file.name, rows: et.rows, total: et.total, umbrella: et.umbrella }; return; }
+        var t = vTable_(sheets); if (!t.ok) throw new Error(file.name + ' — 전표도 교육이수현황도 아닙니다. ' + t.error);
+        var byMonth = {}; t.rows.forEach(function (r) { byMonth[r.ym || '날짜없음'] = (byMonth[r.ym || '날짜없음'] || 0) + 1; });
+        V.file = { name: file.name, rows: t.rows, total: t.rows.length, skipped: t.skipped, byMonth: byMonth, unapproved: t.rows.filter(function (r) { return r.ym === V.ym && /미/.test(r.approved || ''); }).length };
+      }).catch(function (e) { errs.push((e && e.message) || String(e)); });
+    });
+    chain.then(function () {
+      var l = $('#vLoading'); if (l) l.remove();
+      if (errs.length) $('#dlgErr').textContent = '파일을 읽지 못했습니다: ' + errs.join(' / ');
+      if (!V.file && !V.edu) return;
+      if (many && V.file && V.edu && !errs.length) { V.stage = 'review'; vchBuild(); } else renderVoucher();       // 한 번에 둘 다 올리면 바로 확인 화면, 하나만이면 다른 파일을 더 올릴 수 있게 잠시 멈춘다
+    });
   }
-  function vchBuild() {                                             // 그 달 줄을 묶고 규칙으로 매칭 → 화면 → (켜져 있으면) AI
-    var V = VCH, rows = V.file.rows.filter(function (r) { return r.ym === V.ym && !(V.exclUn && /미/.test(r.approved || '')); });
-    V.groups = vGroups_(rows); vMatchGroups_(V.groups, V.projects, V.setup.mem);
+  function vchBuild() {                                             // 그 달 자료를 묶고 규칙으로 매칭 → 화면 → (켜져 있으면) 전표 AI
+    var V = VCH;
+    if (V.file) { var rows = V.file.rows.filter(function (r) { return r.ym === V.ym && !(V.exclUn && /미/.test(r.approved || '')); }); V.groups = vGroups_(rows); vMatchGroups_(V.groups, V.projects, V.setup.mem); } else V.groups = null;
+    if (V.edu) { V.eduGroups = eduGroups_(eduMonth_(V.edu.rows, V.ym)); vMatchGroups_(V.eduGroups, V.projects, V.setup.mem); } else V.eduGroups = null;
     renderVoucher(); vchAi();
   }
 
@@ -3130,7 +3287,7 @@ var api = {
     if (!V.aiOn) { msg.innerHTML = '<label class="vh-chk"><input type="checkbox" id="vAiOn"> AI로 애매한 줄 판단하기</label>'; $('#vAiOn').addEventListener('change', function (e) { if (e.target.checked) { var c = vchCfg(); c.consent = true; vchSaveCfg(c); V.aiOn = true; vchAi(); } }); return; }
     var todo = V.groups.filter(function (g) { return g.src !== 'memory' && !g.user && g.ai && g.level !== 'auto' && !V.aiCache[g.key]; });
     if (!todo.length) { vchAiApply(); msg.textContent = 'AI 판단 반영됨' + (V.aiModel ? ' · 모델 ' + V.aiModel : ''); return; }
-    var run = V.aiRun = (V.aiRun || 0) + 1, ex = V.setup.mem.filter(function (m) { return m.sig.indexOf('B:') !== 0 && m.t; }).slice(0, 20).map(function (m) { return { t: m.t, name: m.name }; });
+    var run = V.aiRun = (V.aiRun || 0) + 1, ex = V.setup.mem.filter(function (m) { return m.sig.indexOf('B:') !== 0 && m.sig.indexOf('E:') !== 0 && m.t; }).slice(0, 20).map(function (m) { return { t: m.t, name: m.name }; });
     var working = function (t) {
       var m = $('#vAiMsg'); if (!m || run !== V.aiRun) return;
       m.innerHTML = '<span class="vh-spin"></span> ' + esc(t) + ' <a href="#" id="vAiPrev">보내는 문구 보기</a> <a href="#" id="vAiOff">끄기</a>';
@@ -3160,21 +3317,28 @@ var api = {
 
   // ── 채우기
   function applyVoucher() {
-    var V = VCH, sums = vchSums(), ids = Object.keys(sums), mineIds = ids.filter(function (id) { return vchPrj(id).mine; }), otherIds = ids.filter(function (id) { return !vchPrj(id).mine; });
-    var byOwner = {}; otherIds.forEach(function (id) { var o = vchPrj(id).owner; (byOwner[o] = byOwner[o] || []).push(id); });
+    var V = VCH, plan = vchCalc(), ids = Object.keys(plan).filter(function (id) { var q = plan[id]; return ['cnt', 'ppl', 'cost'].some(function (f) { return vchFinal(q, f, vchCur(q.p, f)) !== undefined; }); });
+    var mineIds = ids.filter(function (id) { return plan[id].p.mine; }), otherIds = ids.filter(function (id) { return !plan[id].p.mine; });
+    var byOwner = {}; otherIds.forEach(function (id) { var o = plan[id].p.owner; (byOwner[o] = byOwner[o] || []).push(id); });
     var owners = Object.keys(byOwner);
     if (owners.length) {                                            // 다른 담당자 사업은 그 사람 화면에 없으므로 확인 뒤 바로 저장한다
-      var tot = otherIds.reduce(function (s, id) { return s + sums[id]; }, 0);
-      if (!confirm('다른 담당자 ' + owners.length + '명(' + owners.join(', ') + ')의 사업 ' + otherIds.length + '건, 합계 ' + n(tot) + '원의 ' + ymLabel(V.ym) + ' 비용을 바로 저장합니다.\n' +
-        (V.mode === 'add' ? '이미 입력된 비용에는 더합니다.' : '이미 입력된 비용은 전표 합계로 바뀝니다.') + '\n계속할까요?')) return;
+      var lines = owners.map(function (o) { return '· ' + o + ' — 사업 ' + byOwner[o].length + '건'; }).join('\n');
+      if (!confirm('다른 담당자 ' + owners.length + '명의 ' + ymLabel(V.ym) + ' 실적(차수·인원·비용)을 바로 저장합니다.\n' + lines + '\n' + (V.mode === 'add' ? '이미 입력된 값에는 더합니다.' : '이미 입력된 값은 이번 값으로 바뀝니다.') + '\n계속할까요?')) return;
     }
     var saved = [], failed = [], chain = Promise.resolve();
     $('#dlgSave').disabled = true;
     owners.forEach(function (o) {
       chain = chain.then(function () {
-        return call('apiGetMonth', o, V.ym).then(function (m) {          // 저장 직전의 값을 다시 읽어, 그 담당자가 방금 바꾼 다른 칸(차수·인원·비고 등)을 그대로 두고 비용만 바꾼다
+        return call('apiGetMonth', o, V.ym).then(function (m) {          // 저장 직전의 값을 다시 읽어, 그 담당자가 방금 바꾼 다른 칸(비고 등)을 그대로 두고 채울 칸만 바꾼다
           var by = {}; (m.items || []).forEach(function (it) { by[it.project['사업ID']] = it.entry || {}; });
-          var rows = byOwner[o].map(function (id) { var cur = by[id] || {}, c = Number(cur['비용']), base = V.mode === 'add' && isFinite(c) && c > 0 ? c : 0; return Object.assign({}, cur, { '사업ID': id, '비용': base + sums[id] }); });
+          var rows = byOwner[o].map(function (id) {
+            var q = plan[id], cur = by[id] || {}, row = Object.assign({}, cur, { '사업ID': id });
+            ['cnt', 'ppl', 'cost'].forEach(function (f) {
+              var c = Number(cur[VF[f][0]]), v = vchFinal(q, f, isFinite(c) && c > 0 ? c : ''); if (v !== undefined) row[VF[f][0]] = v;
+            });
+            if (!row['상태'] && V.ym <= S.init.currentYm) row['상태'] = '진행';
+            return row;
+          });
           return call('apiSaveMonth', o, V.ym, rows);
         }).then(function (res) { if (res.ok) saved.push(o + ' ' + res.saved + '건'); else failed.push(o + ': ' + (res.errors || []).join(' ')); })
           .catch(function (e) { failed.push(o + ': ' + ((e && e.message) || e)); });
@@ -3183,10 +3347,12 @@ var api = {
     chain.then(function () {
       var done = 0, first = null, miss = [];
       mineIds.forEach(function (id) {
-        var card = $$('.pcard').filter(function (c) { return c.dataset.id === id; })[0], inp = card && $('.f-cost', card);
-        if (!inp) { miss.push(vchPrj(id).name); return; }
-        var cur = parseNum(inp.value), base = V.mode === 'add' && typeof cur === 'number' && !isNaN(cur) ? cur : 0;
-        inp.value = n(base + sums[id]); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true }));
+        var q = plan[id], p = q.p, card = $$('.pcard').filter(function (c) { return c.dataset.id === id; })[0];
+        if (!card) { miss.push(p.name); return; }
+        ['cnt', 'ppl', 'cost'].forEach(function (f) {
+          var inp = $('.' + VF[f][1], card), v = vchFinal(q, f, vchCur(p, f)); if (!inp || v === undefined) return;
+          inp.value = f === 'cost' ? n(v) : String(v); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true }));
+        });
         var d = card.closest('details'); if (d) d.open = true;
         card.classList.add('vflash'); setTimeout(function () { card.classList.remove('vflash'); }, 3500);
         if (!first) first = card; done++;
@@ -3196,24 +3362,28 @@ var api = {
       closeDlg();
       if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
       var msg = [];
-      if (mineIds.length) msg.push('내 사업 ' + done + '개의 비용 칸을 채웠습니다 (확인한 뒤 아래 [저장]을 눌러야 반영)' + (miss.length ? ' · 이 화면에 없는 사업: ' + miss.join(', ') : ''));
+      if (mineIds.length) msg.push('내 사업 ' + done + '개의 칸을 채웠습니다 (확인한 뒤 아래 [저장]을 눌러야 반영)' + (miss.length ? ' · 이 화면에 없는 사업: ' + miss.join(', ') : ''));
       if (saved.length) msg.push('저장 완료 — ' + saved.join(', '));
       if (failed.length) msg.push('저장 실패 — ' + failed.join(' / '));
       toast(msg.join('\n') || '채울 사업이 없습니다.', !!failed.length || (!done && !saved.length));
     });
   }
-  function vchRemember() {                                          // 확인한 매칭을 기억한다: 문구 → 사업, 예산명 → 사업(한 사업으로 80% 이상 몰릴 때)
+  function vchRemember() {                                          // 확인한 매칭을 기억한다: 문구 → 사업, 예산명 → 사업(한 사업으로 80% 이상 몰릴 때), 교육(계획서+이름) → 사업
     var V = VCH, adds = [], byBud = {};
-    V.groups.forEach(function (g) {
+    (V.groups || []).forEach(function (g) {
       var p = g.pick && vchPrj(g.pick); if (!p || !p.cost || !V.sel[p.owner]) return;       // 입력하기로 한 담당자의 사업만 기억 (선택하지 않은 담당자는 확인한 매칭이 아니므로)
       if (vBanned_(V.projects, g.kws, g.budget)[p.id]) return;     // 키워드·예산 조건에 맞지 않는데 사람이 직접 고른 사업(수탁교육 학회지원·원외 보수교육)은 기억하지 않는다 (다음에도 자동 배정하지 않음)
       if (g.sig && g.src !== 'memory' && g.ai) adds.push({ name: p.name, sig: g.sig, t: g.ai.slice(0, 60) });
       var b = vNorm_(g.budget); if (b) { var o = byBud[b] || (byBud[b] = { n: 0, by: {} }); o.n += g.rows.length; o.by[p.name] = (o.by[p.name] || 0) + g.rows.length; }
     });
     Object.keys(byBud).forEach(function (b) { var o = byBud[b], top = Object.keys(o.by).sort(function (x, y) { return o.by[y] - o.by[x]; })[0]; if (o.n >= 3 && o.by[top] / o.n >= 0.8) adds.push({ name: top, sig: 'B:' + b, t: '' }); });
+    (V.eduGroups || []).forEach(function (x) {                       // 교육이수 매칭: 이름·인원만 (사번·이름은 읽지도 저장하지도 않는다)
+      var p = x.pick && vchPrj(x.pick); if (!p || p.ext || !V.sel[p.owner] || !(p.ppl || p.cnt)) return;
+      if (vBanned_(V.projects, x.kws, x.budget)[p.id]) return;
+      if (x.sig && x.src !== 'memory') adds.push({ name: p.name, sig: x.sig, t: x.text.slice(0, 60) });
+    });
     if (adds.length) call('apiSaveVoucherMem', adds).catch(function () {});
   }
-
   // ═════════ 팀장 승인 (실적표 맨 위 줄: 월마다 결재 도장). 팀장 계정(비밀번호 로그인)으로만 찍고 취소한다
   function isLeaderNow() { return !!S.init.leader && (AUTH.noauth ? S.owner === '팀장' : AUTH.user === '팀장'); }
   function ymFull(ym) { return ym.slice(0, 4) + '년 ' + Number(ym.slice(5, 7)) + '월'; }
@@ -3742,11 +3912,12 @@ var api = {
     var us = uiStatus(e);
     var doneT = '<label class="done-toggle' + (us === '진행' ? ' on' : '') + '" title="이 달 실제로 진행했으면 체크 (예정으로 넣어 둔 값도 체크하면 실적이 됩니다)"><input type="checkbox" class="f-done"' + (us === '진행' ? ' checked' : '') + ' aria-label="' + esc(name + ' 진행') + '"> 진행</label>';
     var cum = cumHtml(item, item.누적);
+    var fixedCnt = (p['상시'] === 'Y' && !kpi) ? '<input class="num f-cnt f-fixed" readonly tabindex="-1" value="' + esc(e['차수'] !== '' && e['차수'] != null ? e['차수'] : ((e['인원'] || e['비용'] || us === '진행') ? 1 : '')) + '" placeholder="1 고정" title="상시 사업은 매달 1차수로 고정됩니다 — 인원만 입력하세요" aria-label="' + esc(name + ' ' + cnt + ' (1 고정)') + '">' : '';
     return '<div class="erow pcard' + (item.planned ? ' is-plan' : '') + '" data-id="' + esc(id) + '" data-us="' + esc(us) + '">' +
       '<div class="c c-name"><div class="title">' + esc(name) + '</div><div class="sub"><a href="#" class="edit-link" data-edit-pid="' + esc(id) + '" title="이 사업의 내용(계획·예정월·입력 설정 등) 수정">✎ 수정</a>' + esc([p['교육구분'], p['세부구분']].filter(String).join(' · ')) + (item.planCnt ? ' · 이 달 계획 ' + item.planCnt + cnt : '') + '</div>' +
       '<div class="err-text f-err"></div></div>' +
       '<div class="c c-plan"><label class="plan-toggle' + (item.planned ? ' on' : '') + '" title="이 달을 이 사업의 예정월로 표시"><input type="checkbox" class="f-plan"' + (item.planned ? ' checked' : '') + ' aria-label="' + esc(name + ' 예정월') + '"> 예정</label>' + doneT + '</div>' +
-      '<div class="c c-num" data-l="' + esc(kpi ? '관리 횟수' : cnt) + '">' + inp('f-cnt', e['차수'], item.planCnt ? '계획 ' + item.planCnt : '', 'decimal', kpi ? '관리 횟수' : cnt) + '</div>' +
+      '<div class="c c-num" data-l="' + esc(kpi ? '관리 횟수' : cnt) + '">' + (fixedCnt || inp('f-cnt', e['차수'], item.planCnt ? '계획 ' + item.planCnt : '', 'decimal', kpi ? '관리 횟수' : cnt)) + '</div>' +
       '<div class="c c-num" data-l="' + esc(pplLabel) + '">' + cPpl + '</div>' +
       '<div class="c c-num" data-l="비용(원)">' + cCost + '</div>' +
       '<div class="c c-note" data-l="진행상황 (글로 적는 내용)"><input class="f-note" value="' + esc(e['비고'] || '') + '" placeholder="이 달 진행상황을 적으세요" aria-label="' + esc(name + ' 진행상황') + '"></div>' +
@@ -3774,6 +3945,8 @@ var api = {
     var g = function (s) { var x = $(s, el); return x ? x.value : ''; };
     var o = { '사업ID': el.dataset.id, '차수': parseNum(g('.f-cnt')), '인원': parseNum(g('.f-ppl')), '비용': parseNum(g('.f-cost')), '지표값': parseNum(g('.f-kpi')),
       '비고': g('.f-note').trim(), '예정': $('.f-plan', el).checked };
+    var pj_ = (S.month.items.filter(function (i) { return i.project['사업ID'] === el.dataset.id; })[0] || {}).project || {};
+    if (pj_['상시'] === 'Y' && pj_['단위'] !== '지표') o['차수'] = ([o['인원'], o['비용']].some(function (v) { return typeof v === 'number' && !isNaN(v); }) || $('.f-done', el).checked) ? 1 : '';       // 「상시」 사업: 차수는 1로 고정
     var hasNum = ['차수', '인원', '비용', '지표값'].some(function (f) { return typeof o[f] === 'number' && !isNaN(o[f]); });
     o['상태'] = $('.f-done', el).checked ? '진행' : ((hasNum || o['비고'] !== '') ? '예정' : '');       // 진행 체크 해제 + 숫자·메모 있음 = 예정으로 보관 (풀어도 다시 진행으로 돌아오지 않는다)
     return o;
@@ -3785,6 +3958,7 @@ var api = {
   }
   function onCardChange(el, id) {
     var cur = collect(el), o = original(id), changed = false;
+    var fc_ = $('.f-cnt.f-fixed', el); if (fc_) fc_.value = cur['차수'] === '' ? '' : cur['차수'];
     ['차수', '인원', '비용', '지표값', '상태', '비고', '예정'].forEach(function (f) { if (String(cur[f]) !== String(o[f])) changed = true; });
     if (changed) S.dirty[id] = cur; else delete S.dirty[id];
     el.classList.toggle('dirty', changed);
@@ -4578,7 +4752,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.7", last = 0, shown = false;
+  var APP_VER = "2026-10-12.8", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
