@@ -665,6 +665,7 @@ table.tree tr:hover .grip { opacity: .95; }
 /* 단계 구분: 교육구분 › 세부구분 › 사업 으로 갈수록 한 단씩 안쪽으로 */
 table.tree tr.lvl1 td { padding: 12px 14px; }
 table.tree tr.lvl1 .sys-cat { font-size: 15px; font-weight: 800; }
+table.tree tr.lvl1 { cursor: pointer; } table.tree tr.lvl1 .cat-hint { visibility: hidden; } table.tree tr.lvl1:hover .cat-hint, table.tree tr.lvl1:focus-visible .cat-hint { visibility: visible; color: #b42318; }
 table.tree tr.lvl2 td { padding: 9px 14px 9px 34px; }
 table.tree tr.lvl2 td b { font-size: 13.5px; }
 table.tree tr.lvl3 td.p-name { padding-left: 56px; }
@@ -2905,6 +2906,34 @@ var api = {
       return { projects: users.length, names: users.slice(0, 5).map(function (p) { return p['사업명']; }), entries: entryKeysOf_(function (e) { return !!ids[e['사업ID']]; }).length };
     });
   },
+  /** 교육구분 삭제 전에 보여 줄 정보: 세부구분 수, 그 교육구분을 쓰는 사업(모든 연도·사용 중지 포함)과 실적 수 */
+  apiCategoryDeleteInfo: function (cat) {
+    return whenReady_().then(function () {
+      var users = listAllProjects_().filter(function (p) { return p['교육구분'] === cat; }), ids = {};
+      users.forEach(function (p) { ids[p['사업ID']] = true; });
+      return { subs: currentSystems_().filter(function (r) { return r['교육구분'] === cat; }).length, projects: users.length, names: users.slice(0, 5).map(function (p) { return p['사업명']; }), entries: entryKeysOf_(function (e) { return !!ids[e['사업ID']]; }).length };
+    });
+  },
+  /** 교육구분 삭제: 그 교육구분의 세부구분을 모두 지운다. 사업이 있으면 cascade 가 필요하고 관리자만 — 사업과 그 월 실적도 함께 지운다. o: {cat, cascade, by} */
+  apiDeleteCategory: function (o) {
+    o = o || {}; var fail = function (m) { return { ok: false, errors: [m] }; };
+    return whenReady_().then(function () {
+      if (D.canWrite === false) return fail('보기 전용으로 열려 있어 삭제할 수 없습니다.');
+      var cat = String(o.cat || ''), rows = currentSystems_(), keep = rows.filter(function (r) { return r['교육구분'] !== cat; }), users = listAllProjects_().filter(function (p) { return p['교육구분'] === cat; });
+      if (keep.length === rows.length && !users.length) return fail('삭제할 교육구분을 찾지 못했습니다. 화면을 새로 고친 뒤 다시 시도하세요.');
+      if (users.length) {
+        if (!o.cascade) return fail('이 교육구분을 쓰는 사업이 ' + users.length + '개 있어 그냥은 삭제할 수 없습니다.');
+        if (!canAdminDo_(o.by)) return fail('사업이 있는 교육구분을 사업·실적과 함께 삭제하는 일은 관리자만 할 수 있습니다.');
+      }
+      var text = stringifySystems_(keep), steps = [{ op: { t: 'set', p: 'config/systems', d: { rows: text } }, loc: function () { D.systemsDoc = { rows: text }; } }], n = 0;
+      users.forEach(function (p) {
+        var pid = p['사업ID'];
+        entryKeysOf_(function (e) { return e['사업ID'] === pid; }).forEach(function (k) { n++; steps.push({ op: { t: 'delete', p: 'entries/' + k }, loc: function () { delete D.entries[k]; } }); });
+        steps.push({ op: { t: 'delete', p: 'projects/' + pid }, loc: function () { delete D.projects[pid]; } });
+      });
+      return runChunks_(steps).then(function (r) { return r.ok ? { ok: true, subs: rows.length - keep.length, projects: users.length, entries: n } : r; });
+    });
+  },
   /** 보고 있는 회계연도를 바꾼다 (이 화면에서만. 시트에는 쓰지 않는다) */
   apiSetYear: function (y) { return whenReady_().then(function () { YEAR_SEL = toYm_(y); return { year: selectedYear_() }; }); },
   /** 신규연도 생성: 마지막 연도의 다음 해를 만든다. o: {start: 화면에 보인 만들 연도('YYYY-MM'), copy: 사용 중인 사업 목록 가져오기, plan: 계획·예정월도 가져오기}
@@ -4325,7 +4354,7 @@ var api = {
       var subs = by[c].filter(function (x) { return !filtering || x.ps.length; });
       if (!subs.length) return;
       var total = subs.reduce(function (a, x) { return a + x.ps.length; }, 0);
-      body += '<tr class="lvl1" data-cat="' + esc(c) + '"' + dg + '><td colspan="8">' + grip + '<span class="sys-cat">' + esc(c) + '</span> <span class="muted small">세부구분 ' + subs.length + '개 · 사업 ' + total + '개</span></td></tr>';
+      body += '<tr class="lvl1" data-cat="' + esc(c) + '"' + dg + ' tabindex="0" role="button" aria-label="' + esc(c + ' 교육구분 관리(삭제)') + '"><td colspan="8">' + grip + '<span class="sys-cat">' + esc(c) + '</span> <span class="muted small">세부구분 ' + subs.length + '개 · 사업 ' + total + '개</span> <span class="muted small cat-hint">· 눌러서 삭제</span></td></tr>';
       subs.forEach(function (x) {
         var r = x.row, key = c + '|' + r['세부구분'];
         body += '<tr class="lvl2' + (r['사용'] === 'Y' ? '' : ' off') + '" data-sys="' + esc(key) + '" data-key="' + esc(key) + '" data-cat="' + esc(c) + '"' + dg + ' tabindex="0" role="button" aria-label="' + esc(c + ' ' + r['세부구분'] + ' 체계 수정') + '"><td colspan="8">' + grip + '<b>' + esc(r['세부구분']) + '</b> <span class="muted small">사업 ' + x.ps.length + '개</span>' +
@@ -4345,7 +4374,7 @@ var api = {
     var tools = '<div class="toolbar"><button class="btn primary" id="btnNew">+ 새 사업</button><button class="btn" id="btnNewSys">+ 새 체계</button>' +
       '<label class="small" style="display:flex;gap:6px;align-items:center;color:var(--ink-2)">담당자 <select id="projOwner" class="search" style="min-width:110px;min-height:32px"><option value="">전체</option>' + S.init.owners.map(function (o) { return '<option' + (o === own ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select></label>' +
       '<input class="search grow" id="projQ" placeholder="사업명·구분 검색" value="' + esc(q) + '"></div>';
-    var rest = '<div class="tree-hint"><b>사용법</b>세부구분 줄을 누르면 체계 이름·사용 수정 · 사업 줄을 누르면 사업 수정 (<b>사업 수정은 담당자 본인과 관리자만</b> — 🔒 사업은 보기만 가능)' + (filtering ? '' : ' · 줄을 끌어서 순서 변경') + '</div>' +
+    var rest = '<div class="tree-hint"><b>사용법</b>교육구분(큰 줄)을 누르면 교육구분 삭제 · 세부구분 줄을 누르면 체계 이름·사용 수정·삭제 · 사업 줄을 누르면 사업 수정 (<b>사업 수정은 담당자 본인과 관리자만</b> — 🔒 사업은 보기만 가능)' + (filtering ? '' : ' · 줄을 끌어서 순서 변경') + '</div>' +
       '<div class="card" style="overflow:auto"><table class="list tree wide"><thead><tr><th>교육구분 › 세부구분 › 사업</th><th class="ctr">담당자</th><th class="ctr">단위</th><th class="r">계획 차수</th><th class="r">계획 인원</th><th class="r">계획 예산(천원)</th><th class="ctr">예정월 (' + esc(S.init.labels[0]) + '→' + esc(S.init.labels[11]) + ')</th><th class="ctr">상태</th></tr></thead><tbody>' +
       (body || '<tr><td colspan="8" class="empty">' + (filtering ? '조건에 맞는 사업이 없습니다.' : '등록된 교육체계가 없습니다. [+ 새 사업]이나 [+ 새 체계]로 추가하세요.') + '</td></tr>') + '</tbody></table></div>' +
       '<p class="small muted">' + (filtering ? '· 검색·담당자 조건을 풀면 줄을 끌어서 순서를 바꿀 수 있습니다. ' : '· <b>줄을 끌어서 순서를 바꿉니다.</b> 교육구분(파란 큰 줄)을 끌면 그 구분 전체가, 세부구분 줄을 끌면 그 세부구분과 사업 전체가, 사업 줄을 끌면 사업 하나만 움직입니다. 다른 세부구분·교육구분 안으로 옮길 수도 있고, 실적표 순서에도 그대로 반영됩니다. ') + '· 사업을 만들 때 새 교육구분·세부구분을 입력하면 새 교육체계로 함께 등록됩니다. · 체계 이름을 바꾸면 그 체계의 사업에도 함께 바뀌고 실적표에 반영됩니다. · 사업이 있는 체계는 삭제 대신 <b>사용 중지</b>로 바꿉니다.</p>';
@@ -4367,7 +4396,33 @@ var api = {
     };
     bindRows('tr[data-edit]', 'edit', openProject, S.projects, function (r) { return r['사업ID']; });
     bindRows('tr[data-sys]', 'sys', openSystem, S.systems, function (r) { return r['교육구분'] + '|' + r['세부구분']; });
+    $$('tr.lvl1', el).forEach(function (b) {                       // 교육구분 줄: 눌러서 삭제 창
+      var open = function () { openCategory(b.dataset.cat); };
+      b.addEventListener('click', open);
+      b.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+    });
     if (!filtering) bindDnd(el);
+  }
+  function openCategory(cat) {
+    call('apiCategoryDeleteInfo', cat).then(function (inf) {
+      var admin = AUTH.noauth || !adminNames_().length || isAdminUser_(AUTH.user), blocked = inf.projects > 0 && !admin;
+      $('#dlgTitle').textContent = '교육구분 삭제 · ' + cat; $('#dlgErr').textContent = '';
+      $('#dlgBody').innerHTML = '<div class="form"><div class="f s6"><div class="help-box"><b>' + esc(cat) + '</b> — 세부구분 <b>' + inf.subs + '개</b>가 삭제됩니다.' +
+        (inf.projects ? '<br>이 교육구분의 사업 <b>' + inf.projects + '개</b>(' + inf.names.map(esc).join(', ') + (inf.projects > inf.names.length ? ' 외' : '') + ')' + (inf.entries ? '와 월 실적 <b>' + inf.entries + '건</b>' : '') + '도 함께 <b>영구 삭제</b>됩니다 (사용 중지·다른 연도의 사업 포함). 되돌릴 수 없습니다.' : '<br>쓰는 사업이 없어 체계만 지워집니다.') +
+        (blocked ? '<br><b>사업이 있는 교육구분은 관리자만 삭제할 수 있습니다.</b> 사업을 먼저 삭제하거나 관리자에게 요청하세요.' : '') + '</div></div>' +
+        (blocked ? '' : '<div class="f s6"><label for="catConfirm">확인: 아래에 <b>' + esc(cat) + '</b> 을(를) 그대로 입력하세요</label><input id="catConfirm" autocomplete="off" placeholder="' + esc(cat) + '"></div>') + '</div>';
+      $('#dlgSave').textContent = '삭제'; $('#dlgSave').style.display = blocked ? 'none' : '';
+      $('#dlg').classList.add('show'); if (!blocked) setTimeout(function () { $('#catConfirm').focus(); }, 50);
+      $('#dlgSave').onclick = function () {
+        if ($('#catConfirm').value.trim() !== cat) { $('#dlgErr').textContent = '확인 문구가 다릅니다. ' + cat + ' 을(를) 그대로 입력하세요.'; return; }
+        $('#dlgSave').disabled = true; $('#dlgErr').textContent = '';
+        call('apiDeleteCategory', { cat: cat, cascade: inf.projects > 0, by: me() }).then(function (res) {
+          if (!res.ok) { $('#dlgErr').textContent = res.errors.join(' '); return; }
+          closeDlg(); toast('삭제했습니다 · ' + cat + ' (세부구분 ' + res.subs + '개' + (res.projects ? ', 사업 ' + res.projects + '개' : '') + (res.entries ? ', 실적 ' + res.entries + '건' : '') + ')');
+          S.systems = null; S.projects = null; S.report = null; S.dash = null; S.month = null; S.ins = null; loadSystems();
+        }).catch(function (e) { $('#dlgErr').textContent = (e && e.message) || String(e); }).then(function () { $('#dlgSave').disabled = false; });
+      };
+    }).catch(function (e) { toast('교육구분 정보를 불러오지 못했습니다: ' + ((e && e.message) || e), true); });
   }
   // ───────── 끌어서 순서 바꾸기: 교육구분 줄=구분 전체, 세부구분 줄=그 세부구분 전체, 사업 줄=사업 하나
   function treeOf(rows, ps) {
@@ -4900,7 +4955,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.12", last = 0, shown = false;
+  var APP_VER = "2026-10-12.13", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
