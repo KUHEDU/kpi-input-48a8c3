@@ -117,6 +117,9 @@ h2.sec .count { font-weight: 500; color: var(--ink-3); font-size: 13px; }
 .btn:hover { background: var(--surface-2); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { background: #1f66bd; }
+.btn.btn-kis, .btn.sm.btn-kis { background: linear-gradient(135deg, #ff8a1f, #f0560a); border-color: #d9480a; color: #fff; font-weight: 700; font-size: 14px; padding: 9px 20px; min-height: 40px; box-shadow: 0 2px 8px rgba(240, 86, 10, .35); }
+.btn.btn-kis:hover { background: linear-gradient(135deg, #ff9a3d, #e04a05); box-shadow: 0 3px 12px rgba(240, 86, 10, .5); transform: translateY(-1px); }
+.btn.btn-kis:focus-visible { outline: 2px solid #ffb877; outline-offset: 2px; }
 .btn.ghost { border-color: transparent; background: none; color: var(--accent); padding-inline: 8px; }
 .btn.sm { padding: 3px 10px; min-height: 28px; font-size: 12px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -3021,7 +3024,7 @@ var api = {
           ppl: p['단위'] !== '지표' && p['인원행'] === 'Y', cnt: p['단위'] !== '지표', always: p['상시'] === 'Y', ext: /원외\s*(직무|보수)교육/.test(String(p['사업명'])) }; }) };
       VCH.sel[S.owner] = true;                                          // 처음에는 내 것만 선택 — 다른 담당자는 직접 골라야 입력된다
       VCH.aiOn = !!vchKey() && !!vchCfg().consent;
-      $('#dlgTitle').textContent = '🧾 전표·교육이수로 실적 채우기 · ' + ymLabel(S.ym); $('#dlgErr').textContent = '';
+      $('#dlgTitle').textContent = '📤 KIS 데이터 업로드 · ' + ymLabel(S.ym); $('#dlgErr').textContent = '';
       renderVoucher(); $('#dlg').classList.add('show');
       $('#dlgSave').onclick = applyVoucher;
     }).catch(function (e) { toast('전표 기능을 열지 못했습니다: ' + ((e && e.message) || e), true); });
@@ -3833,7 +3836,7 @@ var api = {
       '<div><div class="big">' + esc(ymLabel(m.ym)) + ' · ' + esc(m.owner) + '</div>' +
       '<div class="stats"><span>예정 사업 <b class="num">' + planned.length + '</b>건</span><span>진행 <b class="num">' + doneN + '</b>/' + planned.length + '</span>' +
       '<span>예정 외 진행 <b class="num">' + others.filter(filled).length + '</b>건</span></div></div>' +
-      '<div class="end">' + (future ? '' : '<button type="button" class="btn sm" id="btnVoucher" title="ERP 전표 엑셀을 올리면 알맞은 사업의 비용 칸을 채워 줍니다"><span aria-hidden="true">🧾</span> 전표로 비용 채우기</button>') + (m.approval ? '<span class="chip ok" title="팀장이 ' + esc(m.approval.at.slice(0, 10)) + '에 승인했습니다' + (m.approval.changed ? ' · 승인 뒤에 이 달 입력이 다시 저장되었습니다' : '') + '">✔ 팀장 승인 ' + esc(mdOf_(m.approval.at)) + (m.approval.changed ? '*' : '') + '</span>' : '') + (m.submitted ? '<span class="chip ok">✓ 제출함</span><button class="btn sm" id="btnUnsubmit">제출 취소</button>'
+      '<div class="end">' + (future ? '' : '<button type="button" class="btn sm btn-kis" id="btnVoucher" title="KIS의 전표·교육이수현황 엑셀을 올리면 알맞은 사업의 비용·인원·차수 칸을 채워 줍니다"><span aria-hidden="true">📤</span> KIS 데이터 업로드</button>') + (m.approval ? '<span class="chip ok" title="팀장이 ' + esc(m.approval.at.slice(0, 10)) + '에 승인했습니다' + (m.approval.changed ? ' · 승인 뒤에 이 달 입력이 다시 저장되었습니다' : '') + '">✔ 팀장 승인 ' + esc(mdOf_(m.approval.at)) + (m.approval.changed ? '*' : '') + '</span>' : '') + (m.submitted ? '<span class="chip ok">✓ 제출함</span><button class="btn sm" id="btnUnsubmit">제출 취소</button>'
         : (future ? '' : '<button class="btn" id="btnSubmit">이 달 입력 완료 · 제출</button>')) + '</div></div>';
     if (future) html += '<div class="notice">아직 오지 않은 달입니다. 여기에 넣은 숫자는 <b>예정</b>으로 저장되고, 실적 합계에는 들어가지 않습니다. 예정월 체크로 사업 일정을 잡을 수 있습니다.</div>';
     else if (planned.length > doneN) html += '<div class="notice warn">이 달 예정 사업 중 <b>' + (planned.length - doneN) + '건</b>이 아직 진행 표시나 실적이 없습니다. 진행했다면 <b>진행</b>을 체크하세요.</div>';
@@ -4764,7 +4767,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.9", last = 0, shown = false;
+  var APP_VER = "2026-10-12.10", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
