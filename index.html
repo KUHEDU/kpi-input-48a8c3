@@ -427,7 +427,7 @@ td.ap.go:hover .ap-btn { border-color: #c0392b; color: #c0392b; }
 .vtot td { vertical-align: middle; } .vtot .vcur { color: var(--ink-3); font-size: 11.5px; } .vtot input.vov { width: 64px; padding: 3px 6px; border: 1px solid var(--line-strong); border-radius: 6px; text-align: right; font: inherit; background: var(--surface); color: var(--ink); } .vtot small.vsrc { display: block; color: var(--ink-3); font-size: 10.5px; line-height: 1.3; }
 .vtbl td.own { white-space: nowrap; font-weight: 600; font-size: 12.5px; } .vtbl td.own small { font-weight: 400; color: var(--ink-3); }
 .vh-oth { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-oth h4 { margin: 0 0 6px; font-size: 14px; } .vh-oth h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-oth .vh-chk { margin: 6px 0 10px; } .vh-oth table.vtot { margin-bottom: 6px; }
-.vh-un { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-un h4 { margin: 0 0 8px; font-size: 14px; } .vh-un h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-un .vtbl-wrap { max-height: 360px; overflow: auto; } .vh-un td.mo { white-space: nowrap; } .vh-un td.mo select { max-width: 120px; }
+.vh-un { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-un h4 { margin: 0 0 8px; font-size: 14px; } .vh-un h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-un .vtbl-wrap { max-height: 360px; overflow: auto; } .vh-un td.mo { white-space: nowrap; } .vh-un small.dref { display: block; color: var(--ink-2); font-size: 11px; margin-top: 2px; } .vh-un td.mo select { max-width: 120px; }
 .vh-own { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
 .vh-own > b { margin-right: 4px; }
 .vh-own label.oc { display: inline-flex; gap: 6px; align-items: center; padding: 4px 11px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); cursor: pointer; }
@@ -2461,8 +2461,12 @@ function eduGroups_(courses) {
   var map = {}, list = [];
   courses.forEach(function (c) {
     var f = c.rows[0], base = eduBase_(f.name), sig = 'E:' + (f.plan || '-') + '|' + vSig_(base), g = map[sig];
-    if (!g) { g = map[sig] = { key: sig, text: base, ai: vAiText_(vMask_(vClean_(base))), budget: f.cat, sig: sig, kws: vKwFlags_(base), rows: [], amount: 0, persons: 0, sessions: 0, codes: 0, plan: f.plan, cat: f.cat, mode: f.mode, session: 0, ongoing: 0 }; list.push(g); }
+    if (!g) { g = map[sig] = { key: sig, text: base, ai: vAiText_(vMask_(vClean_(base))), budget: f.cat, sig: sig, kws: vKwFlags_(base), rows: [], amount: 0, persons: 0, sessions: 0, codes: 0, plan: f.plan, cat: f.cat, mode: f.mode, session: 0, ongoing: 0, s: '', e: '', d0: '', d1: '', noDone: 0 }; list.push(g); }
     g.persons += c.rows.length; g.codes++;
+    c.rows.forEach(function (r) {                                   // 참고용 날짜: 교육기간(시작~종료)·이수일자 범위·이수일자 없는 줄 수
+      if (r.start && (!g.s || r.start < g.s)) g.s = r.start; if (r.end && (!g.e || r.end > g.e)) g.e = r.end;
+      if (r.done) { if (!g.d0 || r.done < g.d0) g.d0 = r.done; if (!g.d1 || r.done > g.d1) g.d1 = r.done; } else g.noDone++;
+    });
     if (c.kind === 'session') { g.sessions++; g.session += c.rows.length; } else g.ongoing += c.rows.length;
   });
   return list;
@@ -3493,6 +3497,16 @@ var api = {
     var out = vchUnAll().concat(vchOthAll()).filter(function (g) { return (g.ownPick || (g.ym && g.user)) && ((g.persons !== undefined) === edu); });
     return out;
   }
+  function vchDateRef(g) {                                          // 직접 판단할 때 참고하도록 날짜 정보를 한 줄로
+    var rg = function (a, b) { return a ? (b && b !== a ? a + ' ~ ' + b : a) : ''; };
+    if (g.persons !== undefined) {
+      var d = rg(g.d0, g.d1), p = rg(g.s, g.e);
+      return [p ? '교육기간 ' + p : '교육기간 없음', d ? '이수일자 ' + d : '이수일자 없음', g.noDone && d ? '이수일자 없는 ' + g.noDone + '명' : ''].filter(String).join(' · ');
+    }
+    var ds = g.rows.map(function (r) { return r.date; }).filter(String).sort(), lines = g.rows.slice(0, 4).map(function (r) { return r.line; }).filter(Boolean);
+    var lead = g.rows.map(function (r) { var m = String(r.text || '').match(/^\s*(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/); return m ? m[1] + '/' + m[2] : ''; }).filter(String)[0];
+    return [ds.length ? '전표일자 ' + rg(ds[0], ds[ds.length - 1]) : '전표일자 없음', lead ? '기재사항 앞 날짜 ' + lead : '', lines.length ? '파일 ' + lines.join('·') + '번째 줄' + (g.rows.length > lines.length ? ' 외' : '') : ''].filter(String).join(' · ');
+  }
   function vchUnList() {
     var V = VCH, el = $('#vJudge'); if (!el) return;
     var items = [];
@@ -3510,7 +3524,7 @@ var api = {
       var mcell = it.un ? '<select data-um="' + i + '"><option value="">(넣지 않음)</option>' + months.map(function (m) { return '<option value="' + m + '"' + (g.ym === m ? ' selected' : '') + '>' + esc(ymLabel(m)) + '</option>'; }).join('') + '</select>' : esc(ymLabel(it.ym));
       var size = edu ? '인원 ' + n(g.persons) + (g.sessions ? ' · 세션 ' + g.sessions : '') : n(g.rows.length) + '줄 · ' + n(g.amount) + '원';
       var why = it.un ? (edu ? '날짜 없음' : '일자 없음') : (g.pick ? '확인 필요' : '못 찾음');
-      return '<tr class="lv-' + lv + '"><td class="dot"><i></i></td><td class="mo">' + mcell + '</td><td class="tx" title="' + esc(g.text) + '"><div>' + esc(g.text) + '</div><small>' + esc((edu ? '교육이수' : '전표') + ' · ' + why + (edu ? (g.cat ? ' · ' + g.cat : '') : (g.budget ? ' · ' + g.budget : ''))) + '</small></td>' +
+      return '<tr class="lv-' + lv + '"><td class="dot"><i></i></td><td class="mo">' + mcell + '</td><td class="tx" title="' + esc(g.text) + '"><div>' + esc(g.text) + '</div><small>' + esc((edu ? '교육이수' : '전표') + ' · ' + why + (edu ? (g.cat ? ' · ' + g.cat : '') : (g.budget ? ' · ' + g.budget : ''))) + '</small><small class="dref">' + esc(vchDateRef(g)) + '</small></td>' +
         '<td class="r num">' + size + '</td><td><select data-u="' + i + '">' + vchOptions(g) + '</select></td><td class="bd">' + vchBadge(g) + '</td></tr>';
     }).join('');
     el.innerHTML = '<h4>직접 판단이 필요한 자료 <small>(' + items.length + '묶음 — 달·사업을 고르면 위의 표에 더해집니다. 고르지 않으면 넣지 않습니다)</small></h4>' +
@@ -5145,7 +5159,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.15", last = 0, shown = false;
+  var APP_VER = "2026-10-12.16", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
