@@ -117,6 +117,11 @@ h2.sec .count { font-weight: 500; color: var(--ink-3); font-size: 13px; }
 .btn:hover { background: var(--surface-2); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.primary:hover { background: #1f66bd; }
+.btn.danger { color: #b42318; border-color: #f0b4ae; background: #fff5f4; }
+.btn.danger:hover:not(:disabled) { background: #fee4e2; }
+.btn.danger.armed { background: #d92d20; border-color: #d92d20; color: #fff; }
+.yr-del .yr-tx b { color: #b42318; }
+.ps-del { border-top: 1px dashed #f0b4ae; }
 .btn.btn-kis, .btn.sm.btn-kis { background: linear-gradient(135deg, #ff8a1f, #f0560a); border-color: #d9480a; color: #fff; font-weight: 700; font-size: 14px; padding: 9px 20px; min-height: 40px; box-shadow: 0 2px 8px rgba(240, 86, 10, .35); }
 .btn.btn-kis:hover { background: linear-gradient(135deg, #ff9a3d, #e04a05); box-shadow: 0 3px 12px rgba(240, 86, 10, .5); transform: translateY(-1px); }
 .btn.btn-kis:focus-visible { outline: 2px solid #ffb877; outline-offset: 2px; }
@@ -2489,7 +2494,7 @@ function yearsInfo_() {
   var list = yearList_(), cur = nowYm_(), cnt = {}, latest = list[list.length - 1], next = addMonths_(latest, 12);
   listAllProjects_().forEach(function (p) { if (p['사용'] === 'Y') { var y = projYear_(p); cnt[y] = (cnt[y] || 0) + 1; } });
   return { year: selectedYear_(), canCreate: latest <= cur,                       // 마지막 연도가 시작된 뒤에만 다음 연도를 만들 수 있다
-    years: list.map(function (y) { return { start: y, label: fyLabel_(y), range: fyRange_(y), state: y > cur ? 'future' : addMonths_(y, 11) < cur ? 'past' : 'now', count: cnt[y] || 0 }; }),
+    years: list.map(function (y) { return { start: y, label: fyLabel_(y), range: fyRange_(y), state: y > cur ? 'future' : addMonths_(y, 11) < cur ? 'past' : 'now', count: cnt[y] || 0, deletable: y === latest && list.length > 1 && !yearDelInfo_(y).why }; }),
     next: { start: next, label: fyLabel_(next), range: fyRange_(next) } };
 }
 function listEntries_() { return Object.keys(D.entries).map(function (k) { return normalizeEntry_(D.entries[k]); }).filter(function (e) { return e['월'] && e['사업ID']; }); }
@@ -2580,6 +2585,27 @@ function startData_() {
   });
 }
 
+/** 관리자 권한: 관리자가 지정되지 않은 곳은 예전처럼 누구나, 지정되어 있으면 관리자만 */
+function canAdminDo_(by) { var a = adminNames_(); return !a.length || a.indexOf(by) >= 0; }
+/** 삭제처럼 문서가 많은 작업: steps [{op, loc}] 를 80개씩 나눠 차례로 쓰고, 하나라도 실패하면 거기서 멈춘다 */
+function runChunks_(steps) {
+  var run = Promise.resolve({ ok: true }), i;
+  for (i = 0; i < steps.length; i += 80) (function (c) { run = run.then(function (r) { return r.ok ? runOps_(c.map(function (x) { return x.op; }), c.map(function (x) { return x.loc; })) : r; }); })(steps.slice(i, i + 80));
+  return run;
+}
+/** 조건에 맞는 실적(entries) 문서 이름(키) 목록 */
+function entryKeysOf_(pred) { return Object.keys(D.entries).filter(function (k) { return pred(normalizeEntry_(D.entries[k])); }); }
+/** 연도 삭제 전 점검: 그 연도에 딸린 사업·실적·제출 기록·승인 도장과, 지울 수 없는 이유(있으면) */
+function yearDelInfo_(start) {
+  var list = yearList_(), y = toYm_(start), last = list[list.length - 1], cur = nowYm_(), ms = {}, pids = {};
+  fiscalMonths_(y).forEach(function (m) { ms[m] = true; });
+  var prj = listAllProjects_().filter(function (p) { return projYear_(p) === y; }); prj.forEach(function (p) { pids[p['사업ID']] = true; });
+  var ek = entryKeysOf_(function (e) { return !!pids[e['사업ID']] || !!ms[e['월']]; });
+  var ck = Object.keys(D.closes).filter(function (k) { return !!ms[toYm_(D.closes[k]['월'])]; });
+  var am = Object.keys(approvals_()).filter(function (m) { return !!ms[m]; });
+  var why = y === baseYear_() ? '처음 연도는 삭제할 수 없습니다.' : y !== last ? '가장 마지막에 만든 연도만 삭제할 수 있습니다.' : (y <= cur && (ek.length || ck.length || am.length)) ? '이미 시작되어 실적이 입력된 연도는 삭제할 수 없습니다.' : '';
+  return { y: y, label: fyLabel_(y), projects: prj.length, entries: ek.length, closes: ck.length, approvals: am.length, why: why, ek: ek, ck: ck, am: am, pids: Object.keys(pids) };
+}
 function runOps_(ops, localApply) {
   var run;
   if (D.db.batch) run = ops.length ? D.db.batch(ops) : Promise.resolve();
@@ -2691,8 +2717,16 @@ var api = {
     var oldRow = idx >= 0 ? rows[idx] : null;
     if (o.remove) {
       if (!oldRow) return fail('삭제할 항목을 찾지 못했습니다.');
-      var used = projects.filter(function (p) { return p['사용'] === 'Y' && p['교육구분'] === oldRow['교육구분'] && p['세부구분'] === oldRow['세부구분']; }).length;
-      if (used) return fail('이 체계를 쓰는 사업이 ' + used + '개 있어 삭제할 수 없습니다. 사용 중지로 바꾸세요.');
+      var usersL = projects.filter(function (p) { return p['교육구분'] === oldRow['교육구분'] && p['세부구분'] === oldRow['세부구분']; }), used = usersL.length;       // 사용 중지된 사업도 센다 (남아 있으면 체계가 다시 생긴다)
+      if (used && !o.cascade) return fail('이 체계를 쓰는 사업이 ' + used + '개(사용 중지 포함) 있어 그냥은 삭제할 수 없습니다. 사업을 먼저 삭제하거나, 관리자가 「사업·실적과 함께 삭제」를 쓰세요.');
+      if (used) {
+        if (!canAdminDo_(o.by)) return fail('사업이 있는 체계를 사업·실적과 함께 삭제하는 일은 관리자만 할 수 있습니다.');
+        usersL.forEach(function (p) {
+          var pid = p['사업ID'];
+          entryKeysOf_(function (e) { return e['사업ID'] === pid; }).forEach(function (k) { ops.push({ t: 'delete', p: 'entries/' + k }); localApply.push(function () { delete D.entries[k]; }); });
+          ops.push({ t: 'delete', p: 'projects/' + pid }); localApply.push(function () { delete D.projects[pid]; });
+        });
+      }
       rows.splice(idx, 1);
     } else {
       if (!cat || !sub) return fail('교육구분과 세부구분을 모두 입력하세요.');
@@ -2828,6 +2862,48 @@ var api = {
     var pid = p['사업ID'], ops = [{ t: 'set', p: 'projects/' + pid, d: toPlain_(p) }], local = [function () { D.projects[pid] = toPlain_(p); }];
     if (write) { var text = stringifySystems_(rows); ops.push({ t: 'set', p: 'config/systems', d: { rows: text } }); local.push(function () { D.systemsDoc = { rows: text }; }); }
     return runOps_(ops, local).then(function (r) { return r.ok ? { ok: true, project: p, newSystem: write && at < 0 } : r; });
+  },
+  /** 연도 삭제 전에 보여 줄 정보 (지울 수 없으면 why) */
+  apiYearDeleteInfo: function (start) { return whenReady_().then(function () { var i = yearDelInfo_(start); return { year: i.y, label: i.label, projects: i.projects, entries: i.entries, closes: i.closes, approvals: i.approvals, why: i.why }; }); },
+  /** 신규연도로 만든 마지막 연도를 지운다: 그 연도의 사업·실적·제출 기록·승인 도장을 지우고 연도 목록(config/years)은 맨 마지막에 고친다. 관리자만. o: {start, by} */
+  apiDeleteYear: function (o) {
+    o = o || {}; var fail = function (m) { return { ok: false, errors: [m] }; };
+    return whenReady_().then(function () {
+      if (D.canWrite === false) return fail('보기 전용으로 열려 있어 삭제할 수 없습니다.');
+      if (!canAdminDo_(o.by)) return fail('연도 삭제는 관리자만 할 수 있습니다.');
+      var i = yearDelInfo_(o.start); if (i.why) return fail(i.why);
+      var steps = [];
+      i.ek.forEach(function (k) { steps.push({ op: { t: 'delete', p: 'entries/' + k }, loc: function () { delete D.entries[k]; } }); });
+      i.ck.forEach(function (k) { steps.push({ op: { t: 'delete', p: 'closes/' + k }, loc: function () { delete D.closes[k]; } }); });
+      i.pids.forEach(function (pid) { steps.push({ op: { t: 'delete', p: 'projects/' + pid }, loc: function () { delete D.projects[pid]; } }); });
+      if (i.am.length) { var ap = approvals_(); i.am.forEach(function (m) { delete ap[m]; }); var at = stringifyApprovals_(ap); steps.push({ op: { t: 'set', p: 'config/approvals', d: { rows: at } }, loc: function () { D.approvalsDoc = { rows: at }; } }); }
+      var rest = yearList_().filter(function (x) { return x !== i.y; }).join(',');
+      steps.push({ op: { t: 'set', p: 'config/years', d: { list: rest } }, loc: function () { D.yearsDoc = { list: rest }; if (YEAR_SEL === i.y) YEAR_SEL = ''; } });
+      return runChunks_(steps).then(function (r) { return r.ok ? { ok: true, label: i.label, year: selectedYear_(), projects: i.projects, entries: i.entries } : r; });
+    });
+  },
+  /** 사업 삭제 전에 보여 줄 정보 */
+  apiProjectDeleteInfo: function (id) { return whenReady_().then(function () { var p = D.projects[id]; return p ? { name: p['사업명'], entries: entryKeysOf_(function (e) { return e['사업ID'] === id; }).length } : { name: '', entries: 0 }; }); },
+  /** 사업 삭제: 사업과 그 사업의 월 실적을 지운다. 담당자 본인 또는 관리자만. */
+  apiDeleteProject: function (id, editor) {
+    var fail = function (m) { return { ok: false, errors: [m] }; };
+    return whenReady_().then(function () {
+      var p = D.projects[id]; if (!p) return fail('사업을 찾지 못했습니다. 화면을 새로 고친 뒤 다시 시도하세요.');
+      if (D.canWrite === false) return fail('보기 전용으로 열려 있어 삭제할 수 없습니다.');
+      var adm = adminNames_(); if (adm.length && adm.indexOf(editor) < 0 && p['담당자'] !== editor) return fail('사업은 담당자 본인(또는 관리자)만 삭제할 수 있습니다.');
+      var steps = entryKeysOf_(function (e) { return e['사업ID'] === id; }).map(function (k) { return { op: { t: 'delete', p: 'entries/' + k }, loc: function () { delete D.entries[k]; } }; });
+      var name = p['사업명'], n = steps.length;
+      steps.push({ op: { t: 'delete', p: 'projects/' + id }, loc: function () { delete D.projects[id]; } });
+      return runChunks_(steps).then(function (r) { return r.ok ? { ok: true, name: name, entries: n } : r; });
+    });
+  },
+  /** 체계 삭제 전에 보여 줄 정보: 그 체계를 쓰는 사업(모든 연도·사용 중지 포함)과 그 사업들의 월 실적 수 */
+  apiSystemDeleteInfo: function (key) {
+    return whenReady_().then(function () {
+      var f = String(key || '').split('|'), ids = {}, users = listAllProjects_().filter(function (p) { return p['교육구분'] === f[0] && p['세부구분'] === f[1]; });
+      users.forEach(function (p) { ids[p['사업ID']] = true; });
+      return { projects: users.length, names: users.slice(0, 5).map(function (p) { return p['사업명']; }), entries: entryKeysOf_(function (e) { return !!ids[e['사업ID']]; }).length };
+    });
   },
   /** 보고 있는 회계연도를 바꾼다 (이 화면에서만. 시트에는 쓰지 않는다) */
   apiSetYear: function (y) { return whenReady_().then(function () { YEAR_SEL = toYm_(y); return { year: selectedYear_() }; }); },
@@ -3471,9 +3547,10 @@ var api = {
         '<span class="yr-tx"><b>' + esc(y.label) + '</b><small>' + esc(y.range) + ' · 사업 ' + y.count + '개</small></span><span class="yr-st ' + y.state + '">' + st[y.state] + '</span></button>';
     }).join('') + '<div class="yr-sep"></div>' +
       '<button type="button" class="yr-new" id="yrNew"' + (I.canCreate ? '' : ' disabled') + '><span class="yr-plus">＋</span><span class="yr-tx"><b>신규연도 생성하기</b><small>' +
-      (I.canCreate ? esc(I.next.label) + ' · ' + esc(I.next.range) : esc(I.next.label) + '는 ' + esc(last.label) + '가 시작된 뒤에 만들 수 있어요') + '</small></span></button>';
+      (I.canCreate ? esc(I.next.label) + ' · ' + esc(I.next.range) : esc(I.next.label) + '는 ' + esc(last.label) + '가 시작된 뒤에 만들 수 있어요') + '</small></span></button>' +
+      (I.years.length > 1 && last.deletable && (AUTH.noauth || !adminNames_().length || isAdminUser_(AUTH.user)) ? '<button type="button" class="yr-new yr-del" id="yrDel"><span class="yr-plus">🗑</span><span class="yr-tx"><b>' + esc(last.label) + ' 삭제하기</b><small>관리자 · 만든 연도를 지웁니다</small></span></button>' : '');
   }
-  function yrMenu(open) { $('#yrMenu').hidden = !open; $('#yrBtn').setAttribute('aria-expanded', open ? 'true' : 'false'); }
+  function yrMenu(open) { if (open) renderYearPick(); $('#yrMenu').hidden = !open; $('#yrBtn').setAttribute('aria-expanded', open ? 'true' : 'false'); }
   $('#yrBtn').addEventListener('click', function (e) { e.stopPropagation(); yrMenu($('#yrMenu').hidden); });
   document.addEventListener('click', function (e) { if (!$('#yrMenu').hidden && !e.target.closest('#yearPick')) yrMenu(false); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') yrMenu(false); });
@@ -3481,6 +3558,7 @@ var api = {
     var it = e.target.closest('[data-yr]'), nw = e.target.closest('#yrNew');
     if (it) { yrMenu(false); switchYear(it.dataset.yr); }
     else if (nw && !nw.disabled) { yrMenu(false); startNewYear(); }
+    else if (e.target.closest('#yrDel')) { yrMenu(false); startDeleteYear(); }
   });
   // 다른 사람이 연도를 만들거나 사업 수가 바뀌면 목록만 갱신 (보고 있는 연도·월은 그대로)
   function syncYears() {
@@ -3506,6 +3584,34 @@ var api = {
     if (!AUTH.noauth && !AUTH.user) { AUTH.afterLogin = function () { refresh(); openNewYear(); }; showLogin(); return; }       // 시트를 바꾸는 일이라 로그인 뒤에
     openNewYear();
   }
+  function startDeleteYear() {
+    if (!confirmLeave()) return;
+    if (!AUTH.noauth && !AUTH.user) { AUTH.afterLogin = function () { refresh(); openDeleteYear(); }; showLogin(); return; }
+    openDeleteYear();
+  }
+  function openDeleteYear() {
+    var I = S.init, ly = I.years[I.years.length - 1];
+    if (!AUTH.noauth && adminNames_().length && !isAdminUser_(AUTH.user)) { toast('연도 삭제는 관리자만 할 수 있습니다.', true); return; }
+    call('apiYearDeleteInfo', ly.start).then(function (inf) {
+      if (inf.why) { toast(inf.why, true); return; }
+      $('#dlgTitle').textContent = '연도 삭제하기'; $('#dlgErr').textContent = '';
+      $('#dlgBody').innerHTML = '<div class="ynew"><div class="yn-hero"><span class="yn-to">' + esc(inf.label) + '</span></div>' +
+        '<div class="help-box"><b>' + esc(inf.label) + '</b>에 만든 <b>사업 ' + inf.projects + '개</b>' + (inf.entries ? ', 입력된 <b>월 실적 ' + inf.entries + '건</b>' : '') + (inf.closes ? ', 제출·확인 기록 ' + inf.closes + '건' : '') + (inf.approvals ? ', 승인 도장 ' + inf.approvals + '개' : '') + '가 모두 <b>영구 삭제</b>됩니다. 되돌릴 수 없습니다.</div>' +
+        '<ul class="yn-notes"><li>지우기 전에 위쪽 「백업 내려받기」로 백업을 받아 두세요.</li><li>다른 연도와 교육체계(교육구분·세부구분)는 그대로 남습니다.</li></ul>' +
+        '<div class="pf" style="margin-top:12px"><label for="ydConfirm">확인: 아래에 <b>' + esc(inf.label) + '</b> 를 그대로 입력하세요</label><input id="ydConfirm" autocomplete="off" placeholder="' + esc(inf.label) + '"></div></div>';
+      $('#dlgSave').textContent = inf.label + ' 삭제';
+      $('#dlg').classList.add('show'); setTimeout(function () { $('#ydConfirm').focus(); }, 50);
+      $('#dlgSave').onclick = function () {
+        if ($('#ydConfirm').value.trim() !== inf.label) { $('#dlgErr').textContent = '확인 문구가 다릅니다. ' + inf.label + ' 를 그대로 입력하세요.'; return; }
+        $('#dlgSave').disabled = true; $('#dlgErr').textContent = '';
+        call('apiDeleteYear', { start: ly.start, by: me() }).then(function (res) {
+          if (!res.ok) { $('#dlgErr').textContent = res.errors.join(' '); return; }
+          closeDlg();
+          return switchYear(res.year, res.label + '를 삭제했습니다 (사업 ' + res.projects + '개' + (res.entries ? ', 실적 ' + res.entries + '건' : '') + ').');
+        }).catch(function (e) { $('#dlgErr').textContent = (e && e.message) || String(e); }).then(function () { $('#dlgSave').disabled = false; });
+      };
+    }).catch(function (e) { toast('연도 정보를 불러오지 못했습니다: ' + ((e && e.message) || e), true); });
+  }
   function openNewYear() {
     var I = S.init, nx = I.next, src = I.years[I.years.length - 1];
     if (!I.canCreate) { toast(nx.label + '는 ' + src.label + '가 시작된 뒤에 만들 수 있습니다.', true); return; }
@@ -3515,7 +3621,7 @@ var api = {
       '<p class="yn-range">' + esc(nx.range) + ' · 12개월</p>' +
       '<label class="yn-opt"><input type="checkbox" id="ynCopy" checked><span><b>' + esc(src.label) + ' 사업 목록 가져오기</b><small>사용 중인 사업 ' + src.count + '개를 교육체계·담당자·단위·입력 설정 그대로 복사합니다. 실적 입력값은 가져오지 않습니다.</small></span></label>' +
       '<label class="yn-opt" id="ynPlanRow"><input type="checkbox" id="ynPlan" checked><span><b>계획도 함께 가져오기</b><small>계획 차수·인원·예산과 예정월(1년 뒤 같은 달)을 복사합니다. 끄면 계획은 비워 둡니다.</small></span></label>' +
-      '<ul class="yn-notes"><li>' + esc(src.label) + ' 자료는 그대로 남고, 상단 연도 선택에서 언제든 다시 볼 수 있습니다.</li><li>교육체계(교육구분·세부구분)는 연도와 관계없이 함께 씁니다.</li><li>만든 연도는 이 화면에서 지울 수 없습니다.</li></ul></div>';
+      '<ul class="yn-notes"><li>' + esc(src.label) + ' 자료는 그대로 남고, 상단 연도 선택에서 언제든 다시 볼 수 있습니다.</li><li>교육체계(교육구분·세부구분)는 연도와 관계없이 함께 씁니다.</li><li>잘못 만들면 관리자가 연도 메뉴의 「삭제하기」로 지울 수 있습니다 (실적이 입력되기 전까지).</li></ul></div>';
     var body = $('#dlgBody'), cp = $('#ynCopy', body), pl = $('#ynPlan', body);
     function sync() { pl.disabled = !cp.checked; $('#ynPlanRow', body).classList.toggle('off', !cp.checked); }
     cp.addEventListener('change', sync); sync();
@@ -4140,6 +4246,24 @@ var api = {
     sync();
     $('#dlg').classList.add('show');
     $('[data-k="사업명"]', body).focus();
+    if (!isNew && !ro) {                                           // 사업 삭제: 담당자 본인·관리자만 (이 창이 편집 가능할 때만 보인다)
+      var ds = document.createElement('section'); ds.className = 'ps ps-del'; ds.innerHTML = '<h4>사업 삭제</h4><div class="help-box" id="prjDelBox">확인하는 중…</div>';
+      $('.pform', body).appendChild(ds);
+      call('apiProjectDeleteInfo', p['사업ID']).then(function (inf) {
+        var box = $('#prjDelBox', body); if (!box) return;
+        box.innerHTML = '이 사업' + (inf.entries ? '과 입력된 월 실적 <b>' + inf.entries + '건</b>' : '') + '이 <b>영구 삭제</b>됩니다 (되돌릴 수 없음). 잠시 쓰지 않는 사업은 위의 「사용 중」을 끄는 것으로 충분합니다. <button type="button" class="btn sm danger" id="prjDel">사업 삭제</button>';
+        var b = $('#prjDel', body);
+        b.addEventListener('click', function () {
+          if (b.dataset.armed !== '1') { b.dataset.armed = '1'; b.classList.add('armed'); b.textContent = '한 번 더 누르면 삭제됩니다'; return; }
+          b.disabled = true;
+          call('apiDeleteProject', p['사업ID'], S.owner).then(function (res) {
+            if (!res.ok) { $('#dlgErr').textContent = res.errors.join(' '); b.disabled = false; return; }
+            closeDlg(); toast('삭제했습니다 · ' + res.name + (res.entries ? ' (월 실적 ' + res.entries + '건 포함)' : ''));
+            S.projects = null; S.systems = null; S.report = null; S.dash = null; S.month = null; S.ins = null; if (S.tab === 'systems') loadSystems(); else refresh();
+          }).catch(function (e) { $('#dlgErr').textContent = (e && e.message) || String(e); b.disabled = false; });
+        });
+      }).catch(function () { var box = $('#prjDelBox', body); if (box) box.textContent = '삭제 정보를 불러오지 못했습니다.'; });
+    }
     var fail = function (msg, el) { $('#dlgErr').textContent = msg; if (el) { el.classList.add('bad'); el.scrollIntoView({ block: 'center' }); el.focus(); } };
     if (ro) {                                                      // 다른 담당자의 사업: 보기만 가능
       $('#dlgTitle').textContent = '사업 보기 · ' + p['사업ID'] + ' (수정 권한 없음)';
@@ -4352,8 +4476,8 @@ var api = {
       '<div class="f s3"><label>세부구분 *</label><input id="sysSub" value="' + esc(row['세부구분']) + '" placeholder="예: 신입직원교육" autocomplete="off"></div>' +
       '<div class="f s6"><div class="yn"><label><input type="checkbox" id="sysUse"' + (row['사용'] === 'Y' ? ' checked' : '') + '> 사용 중 (끄면 사업 관리의 선택 목록에서 빠집니다)</label></div></div>' +
       '<div class="f s6" id="grpRow" hidden><div class="yn"><label><input type="checkbox" id="sysGrp" checked> 같은 교육구분의 다른 세부구분(' + (sameCat - 1) + '개)도 함께 새 이름으로 바꾸기</label></div></div>' +
-      (isNew ? '' : '<div class="f s6"><div class="help-box">이 체계를 쓰는 사업 <b>' + row['사업수'] + '개</b>' + (row['사업수'] ? ' — 이름을 바꾸면 이 사업들의 구분도 함께 바뀝니다. 삭제는 할 수 없고 사용 중지만 가능합니다.' : ' — 쓰는 사업이 없어 삭제할 수 있습니다.') +
-        (row['사업수'] ? '' : ' <button class="btn sm" id="sysDel" type="button">삭제</button>') + '</div></div>') +
+      (isNew ? '' : '<div class="f s6"><div class="help-box">이 체계를 쓰는 사업 <b>' + row['사업수'] + '개</b>' + (row['사업수'] ? ' — 이름을 바꾸면 이 사업들의 구분도 함께 바뀝니다. 아래에서 삭제하려면 관리자가 사업·실적과 함께 지울 수 있습니다.' : ' — 쓰는 사업이 없어 삭제할 수 있습니다.') +
+        ' <span id="sysDelSlot"></span>' + '</div></div>') +
       '</div><datalist id="dl-cat">' + cats.map(function (c) { return '<option value="' + esc(c) + '">'; }).join('') + '</datalist>';
     var body = $('#dlgBody');
     var syncGrp = function () { $('#grpRow', body).hidden = isNew || sameCat < 2 || $('#sysCat', body).value.trim() === row['교육구분']; };
@@ -4362,10 +4486,16 @@ var api = {
       if (!res.ok) { $('#dlgErr').textContent = res.errors.join(' '); return; }
       closeDlg(); toast(msg); S.systems = null; S.projects = null; S.report = null; S.dash = null; S.month = null; S.ins = null; loadSystems();
     };
-    var del = $('#sysDel', body);
-    if (del) del.addEventListener('click', function () {
-      if (del.dataset.armed !== '1') { del.dataset.armed = '1'; del.textContent = '한 번 더 누르면 삭제됩니다'; return; }
-      call('apiSaveSystem', { oldKey: oldKey, remove: true }).then(function (res) { done(res, '삭제했습니다'); }).catch(function (e) { $('#dlgErr').textContent = e.message; });
+    if (!isNew) call('apiSystemDeleteInfo', oldKey).then(function (inf) {                 // 쓰는 사업(모든 연도·사용 중지 포함)과 그 실적을 세어 삭제 방식을 정한다
+      var slot = $('#sysDelSlot', body); if (!slot) return;
+      if (inf.projects && !(AUTH.noauth || !adminNames_().length || isAdminUser_(AUTH.user))) { slot.innerHTML = '<br><span class="muted small">사업 ' + inf.projects + '개가 있어 지금은 삭제할 수 없습니다. 사업을 먼저 삭제하거나 관리자에게 요청하세요.</span>'; return; }
+      slot.innerHTML = inf.projects ? '<br><span class="muted small">사업 ' + inf.projects + '개(' + inf.names.map(esc).join(', ') + (inf.projects > inf.names.length ? ' 외' : '') + ')' + (inf.entries ? '와 월 실적 ' + inf.entries + '건' : '') + '이 함께 영구 삭제됩니다.</span> <button class="btn sm danger" id="sysDel" type="button">사업·실적과 함께 삭제</button>' : ' <button class="btn sm danger" id="sysDel" type="button">삭제</button>';
+      var del = $('#sysDel', body);
+      del.addEventListener('click', function () {
+        if (del.dataset.armed !== '1') { del.dataset.armed = '1'; del.classList.add('armed'); del.textContent = '한 번 더 누르면 삭제됩니다'; return; }
+        del.disabled = true;
+        call('apiSaveSystem', { oldKey: oldKey, remove: true, cascade: inf.projects > 0, by: me() }).then(function (res) { if (!res.ok) del.disabled = false; done(res, '삭제했습니다'); }).catch(function (e) { del.disabled = false; $('#dlgErr').textContent = e.message; });
+      });
     });
     $('#dlg').classList.add('show');
     $('#sysCat', body).focus();
@@ -4770,7 +4900,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.11", last = 0, shown = false;
+  var APP_VER = "2026-10-12.12", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
