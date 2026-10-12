@@ -2280,15 +2280,18 @@ function vMatchGroups_(groups, projects, mem) {
 var V_GEMINI = 'https://generativelanguage.googleapis.com/v1beta/';
 function vAiPrompt_(items, projects, examples) {
   var cand = projects.map(function (p) { return { id: p.id, name: p.name, group: ((p.cat || '') + ' > ' + (p.sub || '')).replace(/^ > $/, ''), mine: !!p.mine }; });
-  return '당신은 병원 교육팀의 비용 처리 보조자입니다. 회계 전표의 「기재사항」(지출 내용) 문구가 아래 「교육사업」 목록 중 어느 사업의 비용인지 판단하세요.\n' +
+  var hasEdu = items.some(function (x) { return x.kind === '교육이수'; }), exV = (examples || []).filter(function (e) { return !e.edu; }), exE = (examples || []).filter(function (e) { return e.edu; });
+  return '당신은 병원 교육팀의 실적 처리 보조자입니다. 아래 항목이 「교육사업」 목록 중 어느 사업에 해당하는지 판단하세요. 항목은 두 종류입니다: kind 「전표」는 회계 전표의 「기재사항」(지출 내용)이고, kind 「교육이수」는 교육이수현황의 교육명입니다.\n' +
     '규칙:\n- 가장 알맞은 사업의 id 하나를 고르세요. 어느 사업인지 확신할 수 없거나 해당하는 사업이 없으면 id 를 null 로 하세요. 억지로 맞추지 마세요.\n' +
-    '- 「예산」은 전표의 예산 항목(교육 분류)입니다. 사업 선택의 참고만 하세요.\n- 「mine」이 false 인 사업은 다른 담당자의 사업입니다. 그래도 가장 알맞다면 그 id 를 고르세요.\n' +
+    '- 「budget」은 전표는 예산 항목, 교육이수는 교육구분(교육 분류)입니다. 사업 선택의 참고만 하세요.\n- 「mine」이 false 인 사업은 다른 담당자의 사업입니다. 그래도 가장 알맞다면 그 id 를 고르세요.\n' +
+    (hasEdu ? '- kind 「교육이수」 항목은 교육명으로 판단하세요. 이름에 차수·날짜가 붙어도 같은 교육입니다. 「원외 직무교육」「원외 보수교육」 사업은 전표로 계산하므로 교육이수 항목에는 고르지 마세요.\n' : '') +
     projects.reduce(function (s, p) { V_NEEDKEY.forEach(function (x) { if (x.re.test(String(p.name))) s += '- 「' + p.name + '」 사업은 기재사항에 「' + x.kw + '」라는 말이 있을 때만 고르세요. 없으면 다른 사업(보통 원외 직무교육·원외 보수교육)을 고르거나 null 로 하세요.\n'; }); return s; }, '') +
     projects.reduce(function (s, p) { V_NEEDBUD.forEach(function (x) { if (x.re.test(String(p.name))) s += '- 「' + p.name + '」 사업은 전표의 예산이 「' + x.bud + '」일 때만 고르세요. 예산이 다른 전표(특히 「직원직무교육」)는 이 사업으로 분류하지 마세요.\n'; }); return s; }, '') +
     '- conf 는 0~1 사이의 확신 정도입니다.\n- 설명 없이 JSON 배열만 출력하세요. 형식: [{"i":번호,"id":"P001"또는null,"conf":0.9}]\n\n' +
     '교육사업 목록:\n' + JSON.stringify(cand) + '\n\n' +
-    (examples && examples.length ? '이전에 사람이 확인한 예시(문구 → 사업명):\n' + examples.map(function (e) { return '- ' + e.t + ' → ' + e.name; }).join('\n') + '\n\n' : '') +
-    '판단할 전표 문구:\n' + JSON.stringify(items.map(function (x, i) { return { i: i, text: x.text, budget: x.budget }; }));
+    (exV.length ? '이전에 사람이 확인한 전표 예시(문구 → 사업명):\n' + exV.map(function (e) { return '- ' + e.t + ' → ' + e.name; }).join('\n') + '\n\n' : '') +
+    (exE.length ? '이전에 사람이 확인한 교육이수 예시(교육명 → 사업명):\n' + exE.map(function (e) { return '- ' + e.t + ' → ' + e.name; }).join('\n') + '\n\n' : '') +
+    '판단할 항목:\n' + JSON.stringify(items.map(function (x, i) { return { i: i, kind: x.kind || '전표', text: x.text, budget: x.budget }; }));
 }
 function vJsonFrom_(text) {
   var s = String(text || '').replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -2430,7 +2433,7 @@ function eduGroups_(courses) {
   var map = {}, list = [];
   courses.forEach(function (c) {
     var f = c.rows[0], base = eduBase_(f.name), sig = 'E:' + (f.plan || '-') + '|' + vSig_(base), g = map[sig];
-    if (!g) { g = map[sig] = { key: sig, text: base, ai: '', budget: f.cat, sig: sig, kws: vKwFlags_(base), rows: [], amount: 0, persons: 0, sessions: 0, codes: 0, plan: f.plan, cat: f.cat, mode: f.mode, session: 0, ongoing: 0 }; list.push(g); }
+    if (!g) { g = map[sig] = { key: sig, text: base, ai: vAiText_(vMask_(vClean_(base))), budget: f.cat, sig: sig, kws: vKwFlags_(base), rows: [], amount: 0, persons: 0, sessions: 0, codes: 0, plan: f.plan, cat: f.cat, mode: f.mode, session: 0, ongoing: 0 }; list.push(g); }
     g.persons += c.rows.length; g.codes++;
     if (c.kind === 'session') { g.sessions++; g.session += c.rows.length; } else g.ongoing += c.rows.length;
   });
@@ -3081,7 +3084,7 @@ var api = {
       vchOwnPanel() +
       (info ? '<h4 class="vh-h">전표 → 비용 <small>(원외 직무·보수교육은 줄 수가 인원)</small></h4><div class="vh-sum" id="vSumV"><span class="vs ok"><i></i>자동 ' + n(cnt.auto) + '줄</span><span class="vs mid"><i></i>확인 필요 ' + n(cnt.check) + '줄</span><span class="vs bad"><i></i>못 찾음 ' + n(cnt.none) + '줄</span><span class="vh-aimsg" id="vAiMsg"></span></div>' +
         '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>담당자</th><th>기재사항 (교육명 단서)</th><th class="r">건</th><th class="r">금액(원)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="vBody"></tbody></table></div>' : '') +
-      (V.edu ? '<h4 class="vh-h">교육이수현황 → 인원·차수 <small>(세션형은 강좌코드 1개 = 1차수, 달은 시작일자 · 상시·장기 과정은 이수일자의 달에 인원만)</small></h4><div class="vh-sum" id="vSumE"><span class="vs ok"><i></i>자동 ' + n(ec.auto) + '묶음</span><span class="vs mid"><i></i>확인 필요 ' + n(ec.check) + '묶음</span><span class="vs bad"><i></i>못 찾음 ' + n(ec.none) + '묶음</span></div>' +
+      (V.edu ? '<h4 class="vh-h">교육이수현황 → 인원·차수 <small>(세션형은 강좌코드 1개 = 1차수, 달은 시작일자 · 상시·장기 과정은 이수일자의 달에 인원만)</small></h4><div class="vh-sum" id="vSumE"><span class="vs ok"><i></i>자동 ' + n(ec.auto) + '묶음</span><span class="vs mid"><i></i>확인 필요 ' + n(ec.check) + '묶음</span><span class="vs bad"><i></i>못 찾음 ' + n(ec.none) + '묶음</span>' + (info ? '' : '<span class="vh-aimsg" id="vAiMsg"></span>') + '</div>' +
         '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>담당자</th><th>교육 (계획서 · 교육구분)</th><th class="r">차수</th><th class="r">인원(명)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="eBody"></tbody></table></div>' : '') +
       '<div class="vh-tot" id="vTot"></div>' +
       '<div class="vh-opt"><span>이미 입력된 값은</span><label><input type="radio" name="vMode" value="replace"' + (V.mode === 'replace' ? ' checked' : '') + '> 이번 값으로 <b>바꾸기</b></label><label><input type="radio" name="vMode" value="add"' + (V.mode === 'add' ? ' checked' : '') + '> 이번 값을 <b>더하기</b></label>' +
@@ -3270,7 +3273,7 @@ var api = {
       if (many && V.file && V.edu && !errs.length) { V.stage = 'review'; vchBuild(); } else renderVoucher();       // 한 번에 둘 다 올리면 바로 확인 화면, 하나만이면 다른 파일을 더 올릴 수 있게 잠시 멈춘다
     });
   }
-  function vchBuild() {                                             // 그 달 자료를 묶고 규칙으로 매칭 → 화면 → (켜져 있으면) 전표 AI
+  function vchBuild() {                                             // 그 달 자료를 묶고 규칙으로 매칭 → 화면 → (켜져 있으면) 전표·교육이수 AI
     var V = VCH;
     if (V.file) { var rows = V.file.rows.filter(function (r) { return r.ym === V.ym && !(V.exclUn && /미/.test(r.approved || '')); }); V.groups = vGroups_(rows); vMatchGroups_(V.groups, V.projects, V.setup.mem); } else V.groups = null;
     if (V.edu) { V.eduGroups = eduGroups_(eduMonth_(V.edu.rows, V.ym)); vMatchGroups_(V.eduGroups, V.projects, V.setup.mem); } else V.eduGroups = null;
@@ -3300,17 +3303,17 @@ var api = {
     var V = VCH, msg = $('#vAiMsg'); if (!msg) return;
     if (!vchKey()) { msg.textContent = 'AI 꺼짐 (키 없음) — 규칙 매칭만 사용'; return; }
     if (!V.aiOn) { msg.innerHTML = '<label class="vh-chk"><input type="checkbox" id="vAiOn"> AI로 애매한 줄 판단하기</label>'; $('#vAiOn').addEventListener('change', function (e) { if (e.target.checked) { var c = vchCfg(); c.consent = true; vchSaveCfg(c); V.aiOn = true; vchAi(); } }); return; }
-    var todo = V.groups.filter(function (g) { return g.src !== 'memory' && !g.user && g.ai && g.level !== 'auto' && !V.aiCache[g.key]; });
+    var todo = (V.groups || []).concat(V.eduGroups || []).filter(function (g) { return g.src !== 'memory' && !g.user && g.ai && g.level !== 'auto' && !V.aiCache[g.key]; }), kindOf = function (g) { return g.persons !== undefined ? '교육이수' : '전표'; };       // 전표 묶음 + 교육이수 묶음 (애매한 것만)
     if (!todo.length) { vchAiApply(); msg.textContent = 'AI 판단 반영됨' + (V.aiModel ? ' · 모델 ' + V.aiModel : ''); return; }
-    var run = V.aiRun = (V.aiRun || 0) + 1, ex = V.setup.mem.filter(function (m) { return m.sig.indexOf('B:') !== 0 && m.sig.indexOf('E:') !== 0 && m.t; }).slice(0, 20).map(function (m) { return { t: m.t, name: m.name }; });
+    var run = V.aiRun = (V.aiRun || 0) + 1, memEx = function (edu) { return V.setup.mem.filter(function (m) { return m.t && (edu ? m.sig.indexOf('E:') === 0 : m.sig.indexOf('B:') !== 0 && m.sig.indexOf('E:') !== 0); }).slice(0, 20).map(function (m) { return { t: m.t, name: m.name, edu: edu }; }); }, ex = memEx(false).concat(memEx(true));
     var working = function (t) {
       var m = $('#vAiMsg'); if (!m || run !== V.aiRun) return;
       m.innerHTML = '<span class="vh-spin"></span> ' + esc(t) + ' <a href="#" id="vAiPrev">보내는 문구 보기</a> <a href="#" id="vAiOff">끄기</a>';
       $('#vAiOff').addEventListener('click', function (e) { e.preventDefault(); V.aiOn = false; V.aiRun = (V.aiRun || 0) + 1; vchAi(); });
-      $('#vAiPrev').addEventListener('click', function (e) { e.preventDefault(); alert('Gemini 로 보내는 문구 (' + todo.length + '건)\n\n' + todo.map(function (g) { return '· ' + g.ai + '  [예산: ' + g.budget + ']'; }).join('\n')); });
+      $('#vAiPrev').addEventListener('click', function (e) { e.preventDefault(); alert('Gemini 로 보내는 문구 (' + todo.length + '건 — 교육명·전표 문구뿐이며 사번·이름·금액은 보내지 않습니다)\n\n' + todo.map(function (g) { return '- [' + kindOf(g) + '] ' + g.ai + '  [' + (kindOf(g) === '교육이수' ? '교육구분' : '예산') + ': ' + g.budget + ']'; }).join('\n')); });
     };
     working('AI가 ' + todo.length + '묶음을 판단하는 중…');
-    vAiMatch_(todo.map(function (g) { return { text: g.ai, budget: g.budget, kws: g.kws }; }), V.projects, ex, { key: vchKey(), model: vchModel(), fetch: vchFetch, onStatus: working }).then(function (res) {
+    vAiMatch_(todo.map(function (g) { return { text: g.ai, budget: g.budget, kws: g.kws, kind: kindOf(g) }; }), V.projects, ex, { key: vchKey(), model: vchModel(), fetch: vchFetch, onStatus: working }).then(function (res) {
       if (run !== V.aiRun) return;
       todo.forEach(function (g, i) { V.aiCache[g.key] = res.results[i] || { id: null, conf: 0 }; });
       V.aiModel = res.model; vchAiApply();
@@ -3321,13 +3324,13 @@ var api = {
     });
   }
   function vchAiApply() {
-    VCH.groups.forEach(function (g) {
+    (VCH.groups || []).concat(VCH.eduGroups || []).forEach(function (g) {
       var r = VCH.aiCache[g.key]; if (!r || g.user || g.src === 'memory') return;
       if (r.id && r.conf >= 0.8) { g.pick = r.id; g.src = 'ai'; g.conf = r.conf; g.level = 'auto'; }
       else if (r.id && r.conf >= 0.5) { g.pick = r.id; g.src = 'ai'; g.conf = r.conf; g.level = 'check'; }
       else if (!r.id && g.level === 'auto') g.level = 'check';
     });
-    vchRows(); vchTotals();
+    vchRows(); vchEduRows(); vchTotals();
   }
 
   // ── 채우기
@@ -4767,7 +4770,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.10", last = 0, shown = false;
+  var APP_VER = "2026-10-12.11", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
