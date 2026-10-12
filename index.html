@@ -6,10 +6,17 @@
 <script>
 // 웹 배포본: 페이지 전체 비밀번호. 맞으면 이 브라우저에 기억(해시만 저장)해 다시 묻지 않는다. 풀기 전에는 시트 요청을 보내지 않는다(remote1 이 __GATE 를 기다림).
 (function () {
-  var H = "47419e6953fb401b6104e7caa10c96b34a81f78aa77ecc1ca7317968f8ab8459", KEY = 'kpi.gate', fails = 0, unlock;
+  var H = "47419e6953fb401b6104e7caa10c96b34a81f78aa77ecc1ca7317968f8ab8459", ENC = {"n":600000,"s":"pF24M29Lt+dVJhAW52lBYQ==","i":"dvjv354tQNSFvmHO","c":"ljQviCb8gqbUdcS0o1mmLA/lCwVu/xWgONUx/sOcrIIYUuNEaiEy8PZ91SFstuGpZ8AnzKtoC9y58gHM2WzIaqN9yy5r/DJAa8jcV22zXFgZLZt7fCUa8u3KV4FugviCv3BinSM96exOe3F0xAIAcuFRY2vF3+BHrhCpCcU38aUyZQ=="}, KEY = 'kpi.gate', fails = 0, unlock;
+  function b64(x) { var b = atob(x), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return u; }
+  // 시트 연결 주소는 페이지 비밀번호로 암호화되어 들어 있다 (PBKDF2 → AES-GCM). 비밀번호를 맞게 넣을 때만 풀려 이 브라우저에 저장된다.
+  function decryptUrl(pw) {
+    return crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']).then(function (k) {
+      return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(ENC.s), iterations: ENC.n, hash: 'SHA-256' }, k, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    }).then(function (key) { return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64(ENC.i) }, key, b64(ENC.c)); }).then(function (pt) { return new TextDecoder().decode(pt); });
+  }
   window.__WEB_BUILD = true;   // 웹 배포본 표시: 시트 연결 화면은 관리자만 본다
   window.__GATE = new Promise(function (r) { unlock = r; });
-  function remembered() { try { return localStorage.getItem(KEY) === H; } catch (e) { return false; } }
+  function remembered() { try { return sessionStorage.getItem(KEY) === H || (localStorage.getItem(KEY) === H && (!ENC || !!localStorage.getItem('kpi.api'))); } catch (e) { return false; } }
   if (remembered()) { unlock(); return; }
   document.documentElement.classList.add('gate-lock');
   var st = document.createElement('style');
@@ -39,8 +46,16 @@
       crypto.subtle.digest('SHA-256', new TextEncoder().encode('kpi-gate:' + v)).then(function (b) {
         var hex = Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
         if (hex === H) {
-          try { if (document.getElementById('gateKeep').checked) localStorage.setItem(KEY, H); } catch (e2) {}
-          document.documentElement.classList.remove('gate-lock'); g.remove(); unlock(); return;
+          var keep = document.getElementById('gateKeep').checked, haveUrl = false;
+          try { haveUrl = !!localStorage.getItem('kpi.api'); } catch (e3) {}
+          var done = function (reload) {
+            try { sessionStorage.setItem(KEY, H); if (keep) localStorage.setItem(KEY, H); } catch (e2) {}
+            if (reload) { location.reload(); return; }       // 시트 주소를 처음 저장했으면 한 번 새로 열어 그 주소로 시작한다
+            document.documentElement.classList.remove('gate-lock'); g.remove(); unlock();
+          };
+          if (!ENC || haveUrl) { done(false); return; }
+          decryptUrl(v).then(function (url) { try { localStorage.setItem('kpi.api', url); } catch (e4) { done(false); return; } done(true); }).catch(function () { done(false); });
+          return;
         }
         fails++; pw.value = ''; err.textContent = '비밀번호가 맞지 않습니다';
         if (fails >= 3) { var sec = Math.min(30, 3 * (fails - 2)); go.disabled = true; pw.disabled = true; var t = setInterval(function () { sec--; if (sec <= 0) { clearInterval(t); go.disabled = false; pw.disabled = false; go.textContent = '열기'; pw.focus(); } else go.textContent = sec + '초 뒤 다시 입력'; }, 1000); go.textContent = sec + '초 뒤 다시 입력'; }
@@ -2504,6 +2519,8 @@ var __rst = { fails: 0, until: 0 };
 function parseVmap_(text) { return String(text == null ? '' : text).split('\n').map(function (l) { return l.split('\t'); }).filter(function (f) { return f[0] && f[1]; }).map(function (f) { return { name: f[0], sig: f[1], t: f[2] || '' }; }); }
 function stringifyVmap_(list) { return list.map(function (m) { return [m.name, m.sig, String(m.t || '').replace(/[\t\n]/g, ' ')].join('\t'); }).join('\n'); }
 
+/** 팀장 계정 표시 이름: 설정 시트(config/main)의 「팀장명」이 있으면 「이름 [팀장]」 형태 (계정 이름 자체는 '팀장' 그대로) */
+function leaderLabel_(n) { try { var ln = String(dataConfig_()['팀장명'] || '').trim(); return n === '팀장' && ln ? ln + ' [팀장]' : n; } catch (e) { return n; } }
 /** 관리자 = 설정 시트(config/main)의 「관리자」 열(쉼표로 여러 명). 비어 있으면 빈 목록(= 예전 방식) */
 function adminNames_() { try { return String(dataConfig_()['관리자'] || '').split(',').map(function (x) { return x.trim(); }).filter(String); } catch (e) { return []; } }
 
@@ -3250,7 +3267,7 @@ var api = {
   function onlyDigits(el) { el.addEventListener('input', function () { var v = el.value.replace(/\D/g, '').slice(0, 4); if (v !== el.value) el.value = v; }); }
   function showLogin() {
     var names = ownerNames();
-    $('#lgName').innerHTML = names.map(function (o) { return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('');
+    $('#lgName').innerHTML = names.map(function (o) { return '<option value="' + esc(o) + '">' + esc(leaderLabel_(o)) + '</option>'; }).join('');
     var last = store('kpi.lastUser'); if (last && names.indexOf(last) >= 0) $('#lgName').value = last;
     $('#lgPin').value = ''; $('#lgPin2').value = ''; $('#lgErr').textContent = ''; $('#lgKeep').checked = false;
     $('#login').classList.add('show');
@@ -3296,7 +3313,7 @@ var api = {
     var next = AUTH.afterLogin; AUTH.afterLogin = null;
     if (next) next(); else if (S.tab === 'input') showTab('input'); else refresh();
   }
-  function setBadge(name) { $('#userBadgeName').textContent = name || ''; $('#userBadge').hidden = !name; if (window.__kpiBar) window.__kpiBar(); }       // 로그인·로그아웃에 따라 시트 연결 화면(관리자만)도 다시 그린다
+  function setBadge(name) { $('#userBadgeName').textContent = leaderLabel_(name || ''); $('#userBadge').hidden = !name; if (window.__kpiBar) window.__kpiBar(); }       // 로그인·로그아웃에 따라 시트 연결 화면(관리자만)도 다시 그린다
   function logout() {
     AUTH.user = ''; AUTH.afterLogin = null; S.dash = null; S.report = null; S.month = null; S.ins = null; S.dirty = {};
     try { sessionStorage.removeItem('kpi.sess'); localStorage.removeItem('kpi.keep'); } catch (e) {}
@@ -3315,13 +3332,13 @@ var api = {
   }
   function openAccount() {
     var isL = canReset_(AUTH.user), names = adminNames_().length ? ownerNames() : S.init.owners;
-    $('#dlgTitle').textContent = '내 계정 · ' + AUTH.user; $('#dlgErr').textContent = '';
+    $('#dlgTitle').textContent = '내 계정 · ' + leaderLabel_(AUTH.user); $('#dlgErr').textContent = '';
     $('#dlgBody').innerHTML = '<div class="form"><div class="f s6"><b>비밀번호 변경</b></div>' +
       '<div class="f s2"><label for="acOld">현재 비밀번호</label><input id="acOld" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></div>' +
       '<div class="f s2"><label for="acNew">새 비밀번호</label><input id="acNew" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></div>' +
       '<div class="f s2"><label for="acNew2">새 비밀번호 확인</label><input id="acNew2" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></div></div>' +
       (isL ? '<div class="help-box" style="margin-top:16px"><b>담당자 비밀번호 초기화</b><br>비밀번호를 잊은 담당자는 여기서 초기화하면, 다음 접속 때 새 비밀번호를 직접 정합니다.' +
-        names.map(function (o) { return '<div class="reset-row"><span>' + esc(o) + '</span><button class="btn sm" type="button" data-reset="' + esc(o) + '">초기화</button></div>'; }).join('') + '</div>' : '') +
+        names.map(function (o) { return '<div class="reset-row"><span>' + esc(leaderLabel_(o)) + '</span><button class="btn sm" type="button" data-reset="' + esc(o) + '">초기화</button></div>'; }).join('') + '</div>' : '') +
       '<div style="margin-top:16px"><button class="btn" id="acOut" type="button">로그아웃</button></div>';
     var b = $('#dlgBody'); ['#acOld', '#acNew', '#acNew2'].forEach(function (q) { onlyDigits($(q, b)); });
     $('#acOut', b).addEventListener('click', logout);
@@ -4460,7 +4477,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.4", last = 0, shown = false;
+  var APP_VER = "2026-10-12.5", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
