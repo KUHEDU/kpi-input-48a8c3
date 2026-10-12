@@ -3,6 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="robots" content="noindex,nofollow">
+<script>
+// 웹 배포본: 페이지 전체 비밀번호. 맞으면 이 브라우저에 기억(해시만 저장)해 다시 묻지 않는다. 풀기 전에는 시트 요청을 보내지 않는다(remote1 이 __GATE 를 기다림).
+(function () {
+  var H = "47419e6953fb401b6104e7caa10c96b34a81f78aa77ecc1ca7317968f8ab8459", KEY = 'kpi.gate', fails = 0, unlock;
+  window.__GATE = new Promise(function (r) { unlock = r; });
+  function remembered() { try { return localStorage.getItem(KEY) === H; } catch (e) { return false; } }
+  if (remembered()) { unlock(); return; }
+  document.documentElement.classList.add('gate-lock');
+  var st = document.createElement('style');
+  st.textContent = 'html.gate-lock{overflow:hidden}html.gate-lock body>*:not(#gate){visibility:hidden!important}' +
+    '#gate{position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:16px;background:#1f3b63;font-family:inherit;visibility:visible!important}' +
+    '#gate form{width:min(340px,100%);box-sizing:border-box;padding:26px 24px 22px;border-radius:16px;background:#fff;color:#16202e;box-shadow:0 12px 40px rgba(0,0,0,.35);text-align:center}' +
+    '#gate .gt{font-size:17px;font-weight:800;letter-spacing:-.2px}#gate .gs{margin:4px 0 16px;font-size:13px;color:#4a5568}' +
+    '#gate input[type=password]{width:100%;box-sizing:border-box;padding:12px 14px;border:1.5px solid #c3ccda;border-radius:10px;font-size:20px;letter-spacing:6px;text-align:center}' +
+    '#gate input[type=password]:focus{outline:none;border-color:#2a78d6;box-shadow:0 0 0 3px rgba(42,120,214,.2)}' +
+    '#gate .ge{min-height:20px;margin:8px 0 2px;font-size:12.5px;font-weight:700;color:#c0392b}' +
+    '#gate .gr{display:flex;gap:6px;justify-content:center;align-items:center;margin:2px 0 14px;font-size:12.5px;color:#4a5568;cursor:pointer}' +
+    '#gate button{width:100%;padding:12px;border:0;border-radius:10px;background:#ffd23f;color:#3b2d00;font-size:15px;font-weight:800;cursor:pointer}#gate button:disabled{opacity:.55;cursor:default}';
+  document.head.appendChild(st);
+  function mount() {
+    if (document.getElementById('gate')) return;
+    var g = document.createElement('div'); g.id = 'gate'; g.setAttribute('role', 'dialog'); g.setAttribute('aria-modal', 'true'); g.setAttribute('aria-label', '비밀번호');
+    g.innerHTML = '<form id="gateForm" autocomplete="off"><div class="gt">교육팀 월별 실적 입력</div><div class="gs">비밀번호를 입력하세요</div>' +
+      '<input id="gatePw" type="password" inputmode="numeric" autocomplete="off" maxlength="32" aria-label="비밀번호"><div class="ge" id="gateErr" role="alert"></div>' +
+      '<label class="gr"><input type="checkbox" id="gateKeep" checked> 이 브라우저에서 기억</label><button type="submit" id="gateGo">열기</button></form>';
+    document.body.appendChild(g);
+    var pw = document.getElementById('gatePw'), err = document.getElementById('gateErr'), go = document.getElementById('gateGo');
+    setTimeout(function () { pw.focus(); }, 50);
+    document.getElementById('gateForm').addEventListener('submit', function (e) {
+      e.preventDefault(); if (go.disabled) return;
+      var v = pw.value; if (!v) return;
+      if (!(window.crypto && crypto.subtle)) { err.textContent = '이 브라우저에서는 열 수 없습니다 (https 주소로 접속하세요)'; return; }
+      crypto.subtle.digest('SHA-256', new TextEncoder().encode('kpi-gate:' + v)).then(function (b) {
+        var hex = Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+        if (hex === H) {
+          try { if (document.getElementById('gateKeep').checked) localStorage.setItem(KEY, H); } catch (e2) {}
+          document.documentElement.classList.remove('gate-lock'); g.remove(); unlock(); return;
+        }
+        fails++; pw.value = ''; err.textContent = '비밀번호가 맞지 않습니다';
+        if (fails >= 3) { var sec = Math.min(30, 3 * (fails - 2)); go.disabled = true; pw.disabled = true; var t = setInterval(function () { sec--; if (sec <= 0) { clearInterval(t); go.disabled = false; pw.disabled = false; go.textContent = '열기'; pw.focus(); } else go.textContent = sec + '초 뒤 다시 입력'; }, 1000); go.textContent = sec + '초 뒤 다시 입력'; }
+        else pw.focus();
+      });
+    });
+  }
+  if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount);
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>html,body{margin:0}body{background:#f4f6f9}[hidden]{display:none!important}</style>
 <title>교육팀 월별 실적</title>
@@ -34,11 +81,11 @@ header.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; 
   appearance: none; background-image: linear-gradient(45deg, transparent 50%, #fff 50%), linear-gradient(135deg, #fff 50%, transparent 50%);
   background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
 .pick select option { color: var(--ink); background: #fff; }
-nav.tabs { max-width: 1280px; margin: 0 auto; padding: 0 8px; display: flex; gap: 2px; overflow-x: auto; }
+nav.tabs { max-width: 1280px; margin: 0 auto; padding: 0 2px; display: flex; gap: 2px; overflow-x: auto; }
 nav.tabs button { background: none; border: 0; color: rgba(255,255,255,.72); padding: 10px 14px; border-bottom: 3px solid transparent; cursor: pointer; white-space: nowrap; font-weight: 600; }
 nav.tabs button[aria-selected="true"] { color: #fff; border-bottom-color: #8fc1ff; }
 nav.tabs button:hover { color: #fff; }
-nav.tabs button[data-tab="input"] { margin: 5px 0 5px auto; padding: 6px 16px; border: 0; border-radius: 9px; background: #ffd23f; color: #3b2d00; font-weight: 800; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+nav.tabs button[data-tab="input"] { align-self: center; margin: 3px 14px 6px auto; padding: 10px 26px; font-size: 15.5px; line-height: 1.3; border: 0; border-radius: 11px; background: #ffd23f; color: #3b2d00; font-weight: 800; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
 nav.tabs button[data-tab="input"]:hover { background: #ffdf6b; color: #3b2d00; }
 nav.tabs button[data-tab="input"][aria-selected="true"] { background: #ffe066; color: #2f2400; box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(0,0,0,.3); }
 nav.tabs button[data-tab="input"]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
@@ -444,7 +491,7 @@ svg.chart .lbl { fill: var(--ink-2); font-size: 11px; font-weight: 700; }
 #login .lg-rst small { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.45; }
 #login .lg-sub { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; }
 #login input[type="password"] { text-align: center; letter-spacing: .5em; font-size: 18px; }
-.user-badge { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 0 8px 0 -4px; padding: 3px 11px 3px 9px; border-radius: 999px; border: 1px solid rgba(255,255,255,.38); background: rgba(255,255,255,.16); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.user-badge { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 0 14px 3px -4px; padding: 3px 11px 3px 9px; border-radius: 999px; border: 1px solid rgba(255,255,255,.38); background: rgba(255,255,255,.16); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .user-badge:hover { background: rgba(255,255,255,.28); }
 .user-badge:focus-visible { outline: 2px solid #8fc1ff; outline-offset: 2px; }
 /* ── 회계연도 선택 (상단) · 신규연도 생성 */
@@ -733,7 +780,8 @@ table.tree tr.just-moved td { animation: movedflash 1.8s ease-out; }
     };
     return go();
   }
-  function remote1(body, ms) {
+  function remote1(body, ms) { return (window.__GATE || Promise.resolve()).then(function () { return remote1b(body, ms); }); }
+  function remote1b(body, ms) {
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null, timer = null; ms = ms || 45000; tries++;
     var opt = body ? { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) } : {};
     if (ctl) { opt.signal = ctl.signal; timer = setTimeout(function () { ctl.abort(); }, ms); }
@@ -4394,7 +4442,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.1", last = 0, shown = false;
+  var APP_VER = "2026-10-12.3", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
