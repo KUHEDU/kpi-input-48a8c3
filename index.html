@@ -414,6 +414,12 @@ td.ap.go:hover .ap-btn { border-color: #c0392b; color: #c0392b; }
 .vh-warn { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: #fdf3e1; color: #7a4e0b; line-height: 1.55; }
 .vh-spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; vertical-align: -2px; animation: vspin .8s linear infinite; } @keyframes vspin { to { transform: rotate(360deg); } }
 .pcard.vflash { box-shadow: 0 0 0 3px #8fb6ec; transition: box-shadow .4s; }
+.vh-own { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.vh-own > b { margin-right: 4px; }
+.vh-own label.oc { display: inline-flex; gap: 6px; align-items: center; padding: 4px 11px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); cursor: pointer; }
+.vh-own label.oc.on { border-color: var(--accent); background: var(--accent-soft); }
+.vh-own label.oc.zero small { opacity: .7; } .vh-own label.oc small { color: var(--ink-3); }
+.vh-own a.lnk { margin-left: 6px; font-size: 12.5px; } .vh-own a.lnk:first-of-type { margin-left: auto; }
 .dialog:has(.vch) .body { max-height: none; }
 .dialog:has(.vch) footer { position: sticky; bottom: 0; z-index: 3; background: #fff; border-radius: 0 0 14px 14px; box-shadow: 0 -6px 14px rgba(15, 23, 42, .08); }
 body.wide main { max-width: none; }
@@ -2722,6 +2728,11 @@ var api = {
     if (!p['교육구분'] || !p['세부구분']) errs.push('교육구분과 세부구분을 입력하세요.');
     if (/[|\n]/.test(p['교육구분'] + p['세부구분'])) errs.push('교육구분·세부구분에는 | 문자를 쓸 수 없습니다.');
     if (errs.length) return Promise.resolve({ ok: false, errors: errs });
+    var adm_ = adminNames_();                                     // 관리자가 지정되어 있으면 사업 데이터는 담당자 본인(또는 관리자)만 수정한다
+    if (adm_.length && adm_.indexOf(editor) < 0) {
+      var was_ = isNew ? null : D.projects[p['사업ID']];
+      if (isNew ? p['담당자'] !== editor : (!was_ || was_['담당자'] !== editor || p['담당자'] !== editor)) return Promise.resolve({ ok: false, errors: ['사업 데이터는 담당자 본인(또는 관리자)만 수정할 수 있습니다.'] });
+    }
     if (isNew) {
       p['사업ID'] = nextProjectId_(all); p['연도'] = selectedYear_();       // 새 사업은 지금 보고 있는 연도에 만든다 (사업ID는 모든 연도에서 겹치지 않게)
       if (p['순서'] === 9999) p['순서'] = projects.reduce(function (m, q) { return Math.max(m, q['순서'] === 9999 ? 0 : q['순서']); }, 0) + 1;
@@ -2921,11 +2932,15 @@ var api = {
   function vchFetch(u, o) { return window.fetch(u, o); }
   function vchPrj(id) { return VCH.projects.filter(function (p) { return p.id === id; })[0] || null; }
 
+  // 팀 전체 전표를 올려도 된다: 담당자를 골라 그 담당자의 사업에 비용을 넣는다. 내 사업은 화면 칸을 채운 뒤 [저장]으로, 다른 담당자 사업은 확인을 거쳐 바로 저장한다(그 담당자 화면에는 없으므로).
   function openVoucher() {
     if (!confirmLeave()) return;
-    Promise.all([call('apiVoucherSetup'), call('apiListProjects')]).then(function (r) {
-      VCH = { setup: r[0], ym: S.ym, stage: 'pick', file: null, groups: null, aiCache: {}, aiOn: false, aiMsg: '', exclUn: false, mode: 'replace', remember: true,
-        projects: r[1].filter(function (p) { return p['사용'] === 'Y'; }).map(function (p) { return { id: p['사업ID'], name: p['사업명'], cat: p['교육구분'], sub: p['세부구분'], mine: p['담당자'] === S.owner, cost: p['단위'] !== '지표' && p['비용행'] === 'Y' }; }) };
+    var owners = (S.init.owners || []).slice();
+    Promise.all([call('apiVoucherSetup'), call('apiListProjects')].concat(owners.map(function (o) { return call('apiGetMonth', o, S.ym).catch(function () { return null; }); }))).then(function (r) {
+      var mon = {}; owners.forEach(function (o, i) { var m = r[2 + i]; if (!m) return; var by = {}; (m.items || []).forEach(function (it) { by[it.project['사업ID']] = it.entry; }); mon[o] = { submitted: !!m.submitted, by: by }; });
+      VCH = { setup: r[0], ym: S.ym, stage: 'pick', file: null, groups: null, aiCache: {}, aiOn: false, aiMsg: '', exclUn: false, mode: 'replace', remember: true, owners: owners, month: mon, sel: {},
+        projects: r[1].filter(function (p) { return p['사용'] === 'Y'; }).map(function (p) { return { id: p['사업ID'], name: p['사업명'], cat: p['교육구분'], sub: p['세부구분'], owner: p['담당자'], mine: p['담당자'] === S.owner, cost: p['단위'] !== '지표' && p['비용행'] === 'Y' }; }) };
+      VCH.sel[S.owner] = true;                                          // 처음에는 내 것만 선택 — 다른 담당자는 직접 골라야 입력된다
       VCH.aiOn = !!vchKey() && !!vchCfg().consent;
       $('#dlgTitle').textContent = '🧾 전표로 비용 채우기 · ' + ymLabel(S.ym); $('#dlgErr').textContent = '';
       renderVoucher(); $('#dlg').classList.add('show');
@@ -2948,7 +2963,7 @@ var api = {
       body.innerHTML = '<div class="vch">' +
         '<div class="vh-drop" id="vDrop"><b>전표 엑셀 파일</b>을 여기에 끌어다 놓거나 <button type="button" class="btn sm primary" id="vPick">파일 고르기</button>' +
         '<small>ERP 「교육팀 전표」를 그대로 (.xls · .xlsx · .csv). 파일은 이 브라우저 안에서만 읽고 어디에도 올리지 않습니다.</small><input type="file" id="vFile" accept=".xls,.xlsx,.csv,.txt,.htm,.html" hidden></div>' +
-        '<ul class="vh-how"><li>그 달(' + esc(ymLabel(V.ym)) + ') 전표의 <b>기재사항·예산명</b>을 사업명과 비교해 알맞은 내 사업을 찾습니다.</li><li>같은 문구는 한 줄로 묶어 보여 드리고, 확신이 낮은 줄은 노란색·붉은색으로 표시합니다. <b>고쳐서</b> 쓸 수 있습니다.</li><li>[비용 칸에 채우기]를 누르면 사업 박스의 비용 칸이 채워지고, 확인한 뒤 <b>[저장]</b>을 눌러야 반영됩니다.</li></ul>' + vchAiPanel() + '</div>';
+        '<ul class="vh-how"><li>그 달(' + esc(ymLabel(V.ym)) + ') 전표의 <b>기재사항·예산명</b>을 사업명과 비교해 알맞은 사업을 찾습니다. <b>팀 전체 전표를 올려도 됩니다</b> — 담당자별로 나뉘어 매칭됩니다.</li><li>같은 문구는 한 줄로 묶어 보여 드리고, 확신이 낮은 줄은 노란색·붉은색으로 표시합니다. <b>고쳐서</b> 쓸 수 있습니다.</li><li>다음 화면에서 <b>어느 담당자의 비용을 입력할지 고릅니다</b>(처음에는 내 것만 선택). 내 사업은 비용 칸이 채워지고 <b>[저장]</b>을 눌러야 반영되며, 선택한 다른 담당자의 사업은 확인 후 바로 저장됩니다.</li></ul>' + vchAiPanel() + '</div>';
       $('#dlgSave').textContent = '비용 칸에 채우기'; $('#dlgSave').disabled = true;
       var pick = $('#vPick', body), file = $('#vFile', body), drop = $('#vDrop', body);
       pick.addEventListener('click', function () { file.click(); });
@@ -2967,6 +2982,7 @@ var api = {
         (others.length ? ' <span class="muted">· 다른 달: ' + others.map(function (m) { return esc(m.slice(2)) + ' ' + info.byMonth[m] + '줄'; }).join(', ') + ' (이 달만 사용)</span>' : '') +
         ' <button type="button" class="btn sm" id="vAgain">다른 파일</button></div>' +
       (info.unapproved ? '<label class="vh-chk"><input type="checkbox" id="vUn"' + (V.exclUn ? ' checked' : '') + '> 결재 미승인 전표 ' + n(info.unapproved) + '건 제외</label>' : '') +
+      vchOwnPanel() +
       '<div class="vh-sum"><span class="vs ok"><i></i>자동 ' + n(cnt.auto) + '줄</span><span class="vs mid"><i></i>확인 필요 ' + n(cnt.check) + '줄</span><span class="vs bad"><i></i>못 찾음 ' + n(cnt.none) + '줄</span><span class="vh-aimsg" id="vAiMsg"></span></div>' +
       '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>기재사항 (교육명 단서)</th><th class="r">건</th><th class="r">금액(원)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="vBody"></tbody></table></div>' +
       '<div class="vh-tot" id="vTot"></div>' +
@@ -2979,19 +2995,51 @@ var api = {
     $$('input[name="vMode"]', body).forEach(function (r) { r.addEventListener('change', function () { V.mode = r.value; vchTotals(); }); });
     $('#vRem', body).addEventListener('change', function (e) { V.remember = e.target.checked; });
     var fg = $('#vForget', body); if (fg) fg.addEventListener('click', function (e) { e.preventDefault(); if (!confirm('이전에 확인한 매칭 기억 ' + V.setup.mem.length + '건을 모두 지울까요? (전표 매칭이 처음 상태로 돌아갑니다)')) return; call('apiSaveVoucherMem', [], true).then(function () { V.setup.mem = []; V.aiCache = {}; vchBuild(); toast('기억을 지웠습니다.'); }); });
-    vchBindAi(body); vchRows(); vchTotals();
+    vchBindAi(body); vchOwnBind(body); vchRows(); vchTotals();
+  }
+
+  // ── 담당자 선택: 어느 담당자의 비용을 입력할지 고른다 (이 전표에서 그 담당자 사업으로 매칭된 건수·금액과 지금 상태를 보여 준다)
+  function vchOwnList() {                                           // 나 → 다른 담당자(시트 순서) → 그 밖(담당자 목록에 없는 사업 담당)
+    var V = VCH, list = [S.owner], seen = {}; seen[S.owner] = true;
+    V.owners.concat(V.projects.map(function (p) { return p.owner; })).forEach(function (o) { if (o && !seen[o]) { seen[o] = true; list.push(o); } });
+    return list.filter(function (o) { return V.projects.some(function (p) { return p.owner === o && p.cost; }); });
+  }
+  function vchOwnStat() {                                           // 담당자별: 매칭된 사업 수·금액
+    var st = {}; VCH.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (!p || !p.cost) return; var s = st[p.owner] || (st[p.owner] = { ids: {}, amt: 0 }); s.ids[p.id] = true; s.amt += g.amount; });
+    return st;
+  }
+  function vchOwnPanel() {
+    var V = VCH;
+    return '<div class="vh-own" id="vOwn"><b>입력할 담당자</b>' + vchOwnList().map(function (o) {
+      var m = V.month[o], sub = m && m.submitted ? '<span class="vb warn">이미 제출함</span>' : '';
+      return '<label class="oc" data-own="' + esc(o) + '"><input type="checkbox"' + (V.sel[o] ? ' checked' : '') + '> <span>' + esc(o) + (o === S.owner ? ' (나)' : '') + '</span> <small class="os"></small>' + sub + '</label>';
+    }).join('') + '<a href="#" class="lnk" id="vOwnAll">전체 선택</a><a href="#" class="lnk" id="vOwnMine">내 것만</a></div>';
+  }
+  function vchOwnBind(body) {
+    var V = VCH;
+    $$('#vOwn label.oc', body).forEach(function (l) { $('input', l).addEventListener('change', function (e) { V.sel[l.dataset.own] = e.target.checked; vchRows(); vchTotals(); }); });
+    $('#vOwnAll', body).addEventListener('click', function (e) { e.preventDefault(); vchOwnList().forEach(function (o) { V.sel[o] = true; }); $$('#vOwn input', body).forEach(function (c) { c.checked = true; }); vchRows(); vchTotals(); });
+    $('#vOwnMine', body).addEventListener('click', function (e) { e.preventDefault(); V.sel = {}; V.sel[S.owner] = true; $$('#vOwn label.oc', body).forEach(function (l) { $('input', l).checked = l.dataset.own === S.owner; }); vchRows(); vchTotals(); });
+  }
+  function vchOwnUpdate() {                                         // 선택·매칭이 바뀔 때마다 담당자별 건수·금액 표시를 갱신
+    var st = vchOwnStat();
+    $$('#vOwn label.oc').forEach(function (l) {
+      var o = l.dataset.own, s = st[o], k = s ? Object.keys(s.ids).length : 0;
+      $('.os', l).textContent = k ? k + '개 사업 · ' + n(s.amt) + '원' : '매칭 없음';
+      l.classList.toggle('on', !!VCH.sel[o]); l.classList.toggle('zero', !k);
+    });
   }
 
   function vchOptions(g) {
-    var mineOk = VCH.projects.filter(function (p) { return p.mine && p.cost; }), mineOff = VCH.projects.filter(function (p) { return p.mine && !p.cost; }), others = VCH.projects.filter(function (p) { return !p.mine; });
-    var opt = function (p, dis) { return '<option value="' + esc(p.id) + '"' + (g.pick === p.id ? ' selected' : '') + (dis ? ' disabled' : '') + '>' + esc(p.name) + '</option>'; };
-    return '<option value="">(제외 — 이 줄은 넣지 않음)</option>' + (mineOk.length ? '<optgroup label="내 사업">' + mineOk.map(function (p) { return opt(p); }).join('') + '</optgroup>' : '') +
-      (mineOff.length ? '<optgroup label="내 사업 — 비용 입력이 꺼져 있음">' + mineOff.map(function (p) { return opt(p, g.pick !== p.id); }).join('') + '</optgroup>' : '') +
-      '<optgroup label="다른 담당자 사업 (입력 불가)">' + others.map(function (p) { return opt(p, g.pick !== p.id); }).join('') + '</optgroup>';
+    var V = VCH, opt = function (p) { var off = !p.cost; return '<option value="' + esc(p.id) + '"' + (g.pick === p.id ? ' selected' : '') + (off && g.pick !== p.id ? ' disabled' : '') + '>' + esc(p.name) + (off ? ' (비용 입력 꺼짐)' : '') + '</option>'; };
+    return '<option value="">(제외 — 이 줄은 넣지 않음)</option>' + vchOwnList().concat(V.projects.filter(function (p) { return !p.cost; }).map(function (p) { return p.owner; })).filter(function (o, i, a) { return a.indexOf(o) === i; }).map(function (o) {
+      var ps = V.projects.filter(function (p) { return p.owner === o; }); if (!ps.length) return '';
+      return '<optgroup label="' + esc(o === S.owner ? '내 사업' : o + ' 사업') + '">' + ps.map(opt).join('') + '</optgroup>';
+    }).join('');
   }
   function vchBadge(g) {
     if (!g.pick) return g.user ? '<span class="vb none">제외함</span>' : '<span class="vb none">찾지 못함</span>';
-    var p = vchPrj(g.pick), t = !p ? '' : !p.mine ? ' · 다른 담당자' : !p.cost ? ' · 비용 입력 꺼짐' : '';
+    var p = vchPrj(g.pick), t = !p ? '' : !p.cost ? ' · 비용 입력 꺼짐' : !VCH.sel[p.owner] ? ' · ' + p.owner + ' 선택 안 함' : '';
     var src = g.user ? '<span class="vb user">직접 선택</span>' : g.src === 'memory' ? '<span class="vb mem">이전에 확인함</span>' : g.src === 'ai' ? '<span class="vb ai">AI ' + Math.round(g.conf * 100) + '%</span>' : '<span class="vb rule">추정 ' + Math.round(g.conf * 100) + '%</span>';
     return src + (t ? '<span class="vb warn">' + esc(t.slice(3)) + '</span>' : '');
   }
@@ -3012,20 +3060,30 @@ var api = {
     vchSum();
     $$('#vBody select').forEach(function (s) { s.addEventListener('change', function () { var g = V.groups[+s.dataset.g]; g.pick = s.value; g.user = true; g.src = 'user'; vchRows(); vchTotals(); }); });
   }
-  function vchSums() {
-    var sums = {}; VCH.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (p && p.mine && p.cost) sums[p.id] = (sums[p.id] || 0) + g.amount; });
+  function vchSums() {                                              // 입력 대상 = 선택한 담당자의 비용 입력 가능한 사업
+    var sums = {}; VCH.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (p && p.cost && VCH.sel[p.owner]) sums[p.id] = (sums[p.id] || 0) + g.amount; });
     return sums;
+  }
+  function vchCur(p) {                                              // 그 사업 비용 칸의 지금 값 (내 사업은 화면 칸, 다른 담당자는 시트에 저장된 값)
+    var c = '';
+    if (p.mine) { var card = $$('.pcard').filter(function (x) { return x.dataset.id === p.id; })[0], inp = card && $('.f-cost', card); c = inp ? parseNum(inp.value) : ''; }
+    else { var m = VCH.month[p.owner], e = m && m.by[p.id]; c = e ? Number(e['비용']) : ''; }
+    return typeof c === 'number' && isFinite(c) && c > 0 ? c : '';
   }
   function vchTotals() {
     var V = VCH, sums = vchSums(), ids = Object.keys(sums), skipped = 0, el = $('#vTot'); if (!el) return;
-    V.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (!p || !p.mine || !p.cost) skipped += g.amount; });
+    V.groups.forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (!p || !p.cost || !V.sel[p.owner]) skipped += g.amount; });
+    ids.sort(function (a, b) { var pa = vchPrj(a), pb = vchPrj(b); return (pb.mine - pa.mine) || (pa.owner < pb.owner ? -1 : pa.owner > pb.owner ? 1 : 0); });
+    var others = 0;
     var rows = ids.map(function (id) {
-      var card = $$('.pcard').filter(function (c) { return c.dataset.id === id; })[0], inp = card && $('.f-cost', card), cur = inp ? parseNum(inp.value) : '', has = typeof cur === 'number' && !isNaN(cur) && cur > 0, nv = (V.mode === 'add' && has ? cur : 0) + sums[id];
-      return '<tr><td>' + esc(vchPrj(id).name) + '</td><td class="r num">' + (has ? n(cur) : '—') + '</td><td class="r num"><b>' + n(nv) + '</b></td></tr>';
+      var p = vchPrj(id), cur = vchCur(p), nv = (V.mode === 'add' && cur ? cur : 0) + sums[id]; if (!p.mine) others++;
+      return '<tr><td>' + esc(p.owner) + (p.mine ? ' (나)' : '') + '</td><td>' + esc(p.name) + '</td><td class="r num">' + (cur ? n(cur) : '—') + '</td><td class="r num"><b>' + n(nv) + '</b></td><td>' + (p.mine ? '<span class="vb rule">칸만 채움 · 저장 필요</span>' : '<span class="vb user">바로 저장</span>') + '</td></tr>';
     }).join('');
-    el.innerHTML = '<h4>사업별로 채워질 비용 <small>(원)</small></h4>' + (rows ? '<table class="vtot"><thead><tr><th>사업</th><th class="r">지금 입력값</th><th class="r">채운 뒤</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="muted">채울 사업이 없습니다. 위에서 매칭 사업을 골라 주세요.</div>') +
-      (skipped ? '<div class="muted small">넣지 않는 금액 ' + n(skipped) + '원 (제외·찾지 못함·다른 담당자·비용 입력 꺼짐)</div>' : '');
+    el.innerHTML = '<h4>사업별로 채워질 비용 <small>(원)</small></h4>' + (rows ? '<table class="vtot"><thead><tr><th>담당자</th><th>사업</th><th class="r">지금 입력값</th><th class="r">채운 뒤</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="muted">채울 사업이 없습니다. 위에서 입력할 담당자와 매칭 사업을 골라 주세요.</div>') +
+      (skipped ? '<div class="muted small">넣지 않는 금액 ' + n(skipped) + '원 (제외·찾지 못함·선택하지 않은 담당자·비용 입력 꺼짐)</div>' : '');
     $('#dlgSave').disabled = !ids.length;
+    $('#dlgSave').textContent = others ? '채우기 (다른 담당자 ' + others + '건은 바로 저장)' : '비용 칸에 채우기';
+    vchOwnUpdate();
   }
 
   function vchLoad(file) {
@@ -3099,25 +3157,52 @@ var api = {
 
   // ── 채우기
   function applyVoucher() {
-    var V = VCH, sums = vchSums(), ids = Object.keys(sums), done = 0, first = null, miss = [];
-    ids.forEach(function (id) {
-      var card = $$('.pcard').filter(function (c) { return c.dataset.id === id; })[0], inp = card && $('.f-cost', card);
-      if (!inp) { miss.push(vchPrj(id).name); return; }
-      var cur = parseNum(inp.value), base = V.mode === 'add' && typeof cur === 'number' && !isNaN(cur) ? cur : 0;
-      inp.value = n(base + sums[id]); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true }));
-      var d = card.closest('details'); if (d) d.open = true;
-      card.classList.add('vflash'); setTimeout(function () { card.classList.remove('vflash'); }, 3500);
-      if (!first) first = card; done++;
+    var V = VCH, sums = vchSums(), ids = Object.keys(sums), mineIds = ids.filter(function (id) { return vchPrj(id).mine; }), otherIds = ids.filter(function (id) { return !vchPrj(id).mine; });
+    var byOwner = {}; otherIds.forEach(function (id) { var o = vchPrj(id).owner; (byOwner[o] = byOwner[o] || []).push(id); });
+    var owners = Object.keys(byOwner);
+    if (owners.length) {                                            // 다른 담당자 사업은 그 사람 화면에 없으므로 확인 뒤 바로 저장한다
+      var tot = otherIds.reduce(function (s, id) { return s + sums[id]; }, 0);
+      if (!confirm('다른 담당자 ' + owners.length + '명(' + owners.join(', ') + ')의 사업 ' + otherIds.length + '건, 합계 ' + n(tot) + '원의 ' + ymLabel(V.ym) + ' 비용을 바로 저장합니다.\n' +
+        (V.mode === 'add' ? '이미 입력된 비용에는 더합니다.' : '이미 입력된 비용은 전표 합계로 바뀝니다.') + '\n계속할까요?')) return;
+    }
+    var saved = [], failed = [], chain = Promise.resolve();
+    $('#dlgSave').disabled = true;
+    owners.forEach(function (o) {
+      chain = chain.then(function () {
+        return call('apiGetMonth', o, V.ym).then(function (m) {          // 저장 직전의 값을 다시 읽어, 그 담당자가 방금 바꾼 다른 칸(차수·인원·비고 등)을 그대로 두고 비용만 바꾼다
+          var by = {}; (m.items || []).forEach(function (it) { by[it.project['사업ID']] = it.entry || {}; });
+          var rows = byOwner[o].map(function (id) { var cur = by[id] || {}, c = Number(cur['비용']), base = V.mode === 'add' && isFinite(c) && c > 0 ? c : 0; return Object.assign({}, cur, { '사업ID': id, '비용': base + sums[id] }); });
+          return call('apiSaveMonth', o, V.ym, rows);
+        }).then(function (res) { if (res.ok) saved.push(o + ' ' + res.saved + '건'); else failed.push(o + ': ' + (res.errors || []).join(' ')); })
+          .catch(function (e) { failed.push(o + ': ' + ((e && e.message) || e)); });
+      });
     });
-    if (V.remember) vchRemember();
-    closeDlg();
-    if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    toast(done + '개 사업의 비용 칸을 채웠습니다. 확인한 뒤 아래 [저장]을 눌러야 반영됩니다.' + (miss.length ? ' (이 화면에 없는 사업: ' + miss.join(', ') + ')' : ''), !done);
+    chain.then(function () {
+      var done = 0, first = null, miss = [];
+      mineIds.forEach(function (id) {
+        var card = $$('.pcard').filter(function (c) { return c.dataset.id === id; })[0], inp = card && $('.f-cost', card);
+        if (!inp) { miss.push(vchPrj(id).name); return; }
+        var cur = parseNum(inp.value), base = V.mode === 'add' && typeof cur === 'number' && !isNaN(cur) ? cur : 0;
+        inp.value = n(base + sums[id]); inp.dispatchEvent(new Event('input', { bubbles: true })); inp.dispatchEvent(new Event('change', { bubbles: true }));
+        var d = card.closest('details'); if (d) d.open = true;
+        card.classList.add('vflash'); setTimeout(function () { card.classList.remove('vflash'); }, 3500);
+        if (!first) first = card; done++;
+      });
+      if (V.remember) vchRemember();
+      if (saved.length) { S.report = null; S.dash = null; S.projects = null; S.ins = null; }
+      closeDlg();
+      if (first) first.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      var msg = [];
+      if (mineIds.length) msg.push('내 사업 ' + done + '개의 비용 칸을 채웠습니다 (확인한 뒤 아래 [저장]을 눌러야 반영)' + (miss.length ? ' · 이 화면에 없는 사업: ' + miss.join(', ') : ''));
+      if (saved.length) msg.push('저장 완료 — ' + saved.join(', '));
+      if (failed.length) msg.push('저장 실패 — ' + failed.join(' / '));
+      toast(msg.join('\n') || '채울 사업이 없습니다.', !!failed.length || (!done && !saved.length));
+    });
   }
   function vchRemember() {                                          // 확인한 매칭을 기억한다: 문구 → 사업, 예산명 → 사업(한 사업으로 80% 이상 몰릴 때)
     var V = VCH, adds = [], byBud = {};
     V.groups.forEach(function (g) {
-      var p = g.pick && vchPrj(g.pick); if (!p || !p.mine || !p.cost) return;
+      var p = g.pick && vchPrj(g.pick); if (!p || !p.cost || !V.sel[p.owner]) return;       // 입력하기로 한 담당자의 사업만 기억 (선택하지 않은 담당자는 확인한 매칭이 아니므로)
       if (vBanned_(V.projects, g.kws, g.budget)[p.id]) return;     // 키워드·예산 조건에 맞지 않는데 사람이 직접 고른 사업(수탁교육 학회지원·원외 보수교육)은 기억하지 않는다 (다음에도 자동 배정하지 않음)
       if (g.sig && g.src !== 'memory' && g.ai) adds.push({ name: p.name, sig: g.sig, t: g.ai.slice(0, 60) });
       var b = vNorm_(g.budget); if (b) { var o = byBud[b] || (byBud[b] = { n: 0, by: {} }); o.n += g.rows.length; o.by[p.name] = (o.by[p.name] || 0) + g.rows.length; }
@@ -3262,6 +3347,9 @@ var api = {
   function ownerNames() { var n = S.init.owners.slice(); if (S.init.leader) n.push('팀장'); return n; }
   // 관리자 판단은 adminNames_()(모델 쪽, 설정 시트의 「관리자」 열). 지정되어 있으면 시트 연결·비밀번호 초기화는 관리자만, 비어 있으면 예전 방식(팀장)
   function isAdminUser_(n) { return !!n && adminNames_().indexOf(n) >= 0; }
+  // 사업 데이터 수정 권한: 담당자 본인 또는 관리자 (관리자가 지정되지 않은 곳은 예전처럼 누구나)
+  function canEditProject_(p) { if (AUTH.noauth || !adminNames_().length) return true; return !!AUTH.user && (isAdminUser_(AUTH.user) || (!!p && p['담당자'] === AUTH.user)); }
+  function lockOwner_() { return !AUTH.noauth && adminNames_().length > 0 && !isAdminUser_(AUTH.user); }
   function canReset_(n) { return adminNames_().length ? isAdminUser_(n) : n === '팀장'; }
   window.__kpiCanConnect = function () { if (AUTH.noauth) return true; var ad = adminNames_(); if (!window.__WEB_BUILD && !ad.length) return true; return isAdminUser_(AUTH.user); };
   function onlyDigits(el) { el.addEventListener('input', function () { var v = el.value.replace(/\D/g, '').slice(0, 4); if (v !== el.value) el.value = v; }); }
@@ -3744,9 +3832,11 @@ var api = {
   }
 
   function openProject(p) {
-    call('apiGetSystems').then(function (r) { openProjectWith(p, r.rows); }).catch(function (e) { toast('교육체계를 불러오지 못했습니다: ' + e.message, true); });
+    if (!p && !AUTH.noauth && adminNames_().length && !AUTH.user) { AUTH.afterLogin = function () { openProject(null); }; showLogin(); return; }       // 새 사업은 로그인한 뒤에
+    var ro = !!p && !canEditProject_(p);
+    call('apiGetSystems').then(function (r) { openProjectWith(p, r.rows, ro); }).catch(function (e) { toast('교육체계를 불러오지 못했습니다: ' + e.message, true); });
   }
-  function openProjectWith(p, sys) {
+  function openProjectWith(p, sys, ro) {
     var isNew = !p;
     p = p || { '사업ID': '', '교육구분': '', '세부구분': '', '사업명': '', '담당자': (me() && me() !== '팀장') ? me() : '', '단위': '차수', '지표단위': '', '계획차수': '', '계획인원': '', '계획예산': '',
       '예정월': '', '상시': 'N', '인원행': 'Y', '비용행': 'Y', '합계포함': 'Y', '사용': 'Y', '비고': '' };
@@ -3763,7 +3853,7 @@ var api = {
         '<div class="pf wide"><label>사업명 <b class="req">*</b></label><input class="name-in" data-k="사업명" value="' + esc(p['사업명']) + '" placeholder="예: 정규입사자교육 - 온보딩과정"></div>' +
         '<div class="pf"><label>교육구분 <b class="req">*</b></label><input data-k="교육구분" id="pCat" value="' + esc(p['교육구분']) + '" placeholder="아래에서 고르거나 새로 입력" autocomplete="off"><div class="chips" id="catChips"></div></div>' +
         '<div class="pf"><label>세부구분 <b class="req">*</b></label><input data-k="세부구분" id="pSub" value="' + esc(p['세부구분']) + '" placeholder="아래에서 고르거나 새로 입력" autocomplete="off"><div class="chips" id="subChips"></div></div>' +
-        '<div class="pf"><label>담당자 <b class="req">*</b></label><select data-k="담당자"><option value="">선택</option>' + S.init.owners.map(function (o) { return '<option' + (o === p['담당자'] ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select></div>' +
+        '<div class="pf"><label>담당자 <b class="req">*</b></label><select data-k="담당자"' + (lockOwner_() ? ' disabled title="담당자 변경은 관리자만 할 수 있습니다"' : '') + '><option value="">선택</option>' + S.init.owners.map(function (o) { return '<option' + (o === p['담당자'] ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select></div>' +
       '</div><p class="ph" id="pNewSys"></p></section>' +
       // 2 연간 계획 (맨 위에 한 줄 설정)
       '<section class="ps"><h4><i>2</i>연간 계획 <small>이 사업의 1년 목표입니다 (비워도 됩니다)</small></h4>' +
@@ -3855,6 +3945,12 @@ var api = {
     $('#dlg').classList.add('show');
     $('[data-k="사업명"]', body).focus();
     var fail = function (msg, el) { $('#dlgErr').textContent = msg; if (el) { el.classList.add('bad'); el.scrollIntoView({ block: 'center' }); el.focus(); } };
+    if (ro) {                                                      // 다른 담당자의 사업: 보기만 가능
+      $('#dlgTitle').textContent = '사업 보기 · ' + p['사업ID'] + ' (수정 권한 없음)';
+      $('#dlgBody').insertAdjacentHTML('afterbegin', '<div class="help-box" style="margin-bottom:12px">🔒 <b>보기 전용</b> — 이 사업은 담당자(' + esc(p['담당자']) + ') 본인 또는 관리자만 수정할 수 있습니다.' + (AUTH.user ? '' : ' 로그인하면 본인 사업을 수정할 수 있습니다.') + '</div>');
+      $$('input,select,textarea,button', $('#dlgBody')).forEach(function (x) { x.disabled = true; });
+      $('#dlgSave').style.display = 'none';
+    }
     $('#dlgSave').onclick = function () {
       var o = { '사업ID': p['사업ID'], '순서': p['순서'] };
       $$('[data-k]', body).forEach(function (i) { o[i.dataset.k] = i.value.trim(); });
@@ -3885,7 +3981,7 @@ var api = {
     };
   }
 
-  function closeDlg() { $('#dlg').classList.remove('show'); $('#dlgSave').textContent = '저장'; }
+  function closeDlg() { $('#dlg').classList.remove('show'); $('#dlgSave').textContent = '저장'; $('#dlgSave').style.display = ''; }
   $$('#dlg [data-close]').forEach(function (b) { b.addEventListener('click', closeDlg); });
   $('#dlg').addEventListener('click', function (e) { if (e.target.id === 'dlg') closeDlg(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDlg(); });
@@ -3917,8 +4013,9 @@ var api = {
         x.ps.forEach(function (p) {
           nPrj++;
           var set = {}; String(p['예정월']).split(',').forEach(function (m) { set[m] = 1; });
-          body += '<tr class="lvl3' + (p['사용'] === 'Y' ? '' : ' off') + '" data-edit="' + esc(p['사업ID']) + '" data-key="' + esc(key) + '" data-cat="' + esc(c) + '"' + dg + ' tabindex="0" role="button" aria-label="' + esc(p['사업명'] + ' 수정') + '"><td class="p-name">' + grip + '<b>' + esc(p['사업명']) + '</b></td>' +
-            '<td class="ctr">' + esc(p['담당자']) + '</td><td class="ctr">' + esc(p['단위']) + (p['지표단위'] ? ' (' + esc(p['지표단위']) + ')' : '') + '</td>' +
+          var canE = canEditProject_(p);
+          body += '<tr class="lvl3' + (p['사용'] === 'Y' ? '' : ' off') + (canE ? '' : ' ro') + '" data-edit="' + esc(p['사업ID']) + '" data-key="' + esc(key) + '" data-cat="' + esc(c) + '"' + (canE ? dg : '') + ' tabindex="0" role="button" aria-label="' + esc(p['사업명'] + (canE ? ' 수정' : ' 보기 (수정 권한 없음)')) + '"><td class="p-name">' + (canE ? grip : '') + '<b>' + esc(p['사업명']) + '</b></td>' +
+            '<td class="ctr">' + esc(p['담당자']) + (canE ? '' : ' <span title="담당자 본인 또는 관리자만 수정할 수 있습니다">🔒</span>') + '</td><td class="ctr">' + esc(p['단위']) + (p['지표단위'] ? ' (' + esc(p['지표단위']) + ')' : '') + '</td>' +
             '<td class="r num">' + (p['상시'] === 'Y' ? '상시' : n(p['계획차수'])) + '</td><td class="r num">' + n(p['계획인원']) + '</td><td class="r num">' + k(p['계획예산']) + '</td>' +
             '<td class="ctr"><span class="dots" title="' + esc(String(p['예정월']).split(',').filter(String).map(ymLabel).join(', ')) + '">' + months.map(function (m) { return '<i class="' + (set[m] ? 'on' : '') + '">' + Number(m.slice(5, 7)) + '</i>'; }).join('') + '</span></td>' +
             '<td class="ctr">' + (p['사용'] === 'Y' ? '<span class="chip ok">사용</span>' : '<span class="chip">중지</span>') + (p['합계포함'] === 'N' ? ' <span class="chip">합계 제외</span>' : '') + '</td></tr>';
@@ -3928,7 +4025,7 @@ var api = {
     var tools = '<div class="toolbar"><button class="btn primary" id="btnNew">+ 새 사업</button><button class="btn" id="btnNewSys">+ 새 체계</button>' +
       '<label class="small" style="display:flex;gap:6px;align-items:center;color:var(--ink-2)">담당자 <select id="projOwner" class="search" style="min-width:110px;min-height:32px"><option value="">전체</option>' + S.init.owners.map(function (o) { return '<option' + (o === own ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select></label>' +
       '<input class="search grow" id="projQ" placeholder="사업명·구분 검색" value="' + esc(q) + '"></div>';
-    var rest = '<div class="tree-hint"><b>사용법</b>세부구분 줄을 누르면 체계 이름·사용 수정 · 사업 줄을 누르면 사업 수정' + (filtering ? '' : ' · 줄을 끌어서 순서 변경') + '</div>' +
+    var rest = '<div class="tree-hint"><b>사용법</b>세부구분 줄을 누르면 체계 이름·사용 수정 · 사업 줄을 누르면 사업 수정 (<b>사업 수정은 담당자 본인과 관리자만</b> — 🔒 사업은 보기만 가능)' + (filtering ? '' : ' · 줄을 끌어서 순서 변경') + '</div>' +
       '<div class="card" style="overflow:auto"><table class="list tree wide"><thead><tr><th>교육구분 › 세부구분 › 사업</th><th class="ctr">담당자</th><th class="ctr">단위</th><th class="r">계획 차수</th><th class="r">계획 인원</th><th class="r">계획 예산(천원)</th><th class="ctr">예정월 (' + esc(S.init.labels[0]) + '→' + esc(S.init.labels[11]) + ')</th><th class="ctr">상태</th></tr></thead><tbody>' +
       (body || '<tr><td colspan="8" class="empty">' + (filtering ? '조건에 맞는 사업이 없습니다.' : '등록된 교육체계가 없습니다. [+ 새 사업]이나 [+ 새 체계]로 추가하세요.') + '</td></tr>') + '</tbody></table></div>' +
       '<p class="small muted">' + (filtering ? '· 검색·담당자 조건을 풀면 줄을 끌어서 순서를 바꿀 수 있습니다. ' : '· <b>줄을 끌어서 순서를 바꿉니다.</b> 교육구분(파란 큰 줄)을 끌면 그 구분 전체가, 세부구분 줄을 끌면 그 세부구분과 사업 전체가, 사업 줄을 끌면 사업 하나만 움직입니다. 다른 세부구분·교육구분 안으로 옮길 수도 있고, 실적표 순서에도 그대로 반영됩니다. ') + '· 사업을 만들 때 새 교육구분·세부구분을 입력하면 새 교육체계로 함께 등록됩니다. · 체계 이름을 바꾸면 그 체계의 사업에도 함께 바뀌고 실적표에 반영됩니다. · 사업이 있는 체계는 삭제 대신 <b>사용 중지</b>로 바꿉니다.</p>';
@@ -4477,7 +4574,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.5", last = 0, shown = false;
+  var APP_VER = "2026-10-12.6", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
