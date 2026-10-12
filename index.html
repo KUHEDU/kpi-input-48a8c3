@@ -427,6 +427,7 @@ td.ap.go:hover .ap-btn { border-color: #c0392b; color: #c0392b; }
 .vtot td { vertical-align: middle; } .vtot .vcur { color: var(--ink-3); font-size: 11.5px; } .vtot input.vov { width: 64px; padding: 3px 6px; border: 1px solid var(--line-strong); border-radius: 6px; text-align: right; font: inherit; background: var(--surface); color: var(--ink); } .vtot small.vsrc { display: block; color: var(--ink-3); font-size: 10.5px; line-height: 1.3; }
 .vtbl td.own { white-space: nowrap; font-weight: 600; font-size: 12.5px; } .vtbl td.own small { font-weight: 400; color: var(--ink-3); }
 .vh-oth { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-oth h4 { margin: 0 0 6px; font-size: 14px; } .vh-oth h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-oth .vh-chk { margin: 6px 0 10px; } .vh-oth table.vtot { margin-bottom: 6px; }
+.vh-un { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-un h4 { margin: 0 0 8px; font-size: 14px; } .vh-un h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-un .vtbl-wrap { max-height: 360px; overflow: auto; } .vh-un td.mo { white-space: nowrap; } .vh-un td.mo select { max-width: 120px; }
 .vh-own { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
 .vh-own > b { margin-right: 4px; }
 .vh-own label.oc { display: inline-flex; gap: 6px; align-items: center; padding: 4px 11px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); cursor: pointer; }
@@ -2410,9 +2411,10 @@ function eduTable_(sheets) {
   var C = best.cols, rows = [], seen = {}, umbrella = 0, dup = 0;
   for (var r = best.hi + 1; r < best.sheet.rows.length; r++) {
     var row = best.sheet.rows[r], g = function (k) { return C[k] === undefined ? '' : row[C[k]]; };
-    var name = String(g('name') == null ? '' : g('name')).replace(/\s+/g, ' ').trim(); if (!name) continue;
-    if (/이수관리용/.test(name)) { umbrella++; continue; }                          // 행정용 일괄 이수 기록: 인원이 부풀기 때문에 뺀다
+    var name = String(g('name') == null ? '' : g('name')).replace(/\s+/g, ' ').trim();
     var code = String(g('code') == null ? '' : g('code')).trim(), who = String(g('pid') == null ? '' : g('pid')).trim();
+    if (!name) { if (!code && !who && !vDate_(g('start')) && !vDate_(g('done'))) continue; name = '(교육명 없음)'; }       // 완전히 빈 줄만 건너뛴다
+    if (/이수관리용/.test(name)) { umbrella++; continue; }                          // 행정용 일괄 이수 기록: 인원이 부풀기 때문에 뺀다
     if (who) { var k = code + '|' + who; if (seen[k]) { dup++; continue; } seen[k] = 1; }
     rows.push({ code: code || name, name: name, cat: String(g('cat') || '').trim(), mode: String(g('mode') || '').trim(), start: vDate_(g('start')), end: vDate_(g('end')), done: vDate_(g('done')), plan: String(g('plan') || '').trim() });
   }
@@ -2426,10 +2428,29 @@ function eduMonth_(rows, ym) {
   order.forEach(function (code) {
     var rs = by[code], s0 = rs.map(function (r) { return r.start; }).filter(String).sort()[0] || '', e0 = rs.map(function (r) { return r.end; }).filter(String).sort().pop() || '';
     var session = !s0 || !e0 || eduDays_(s0, e0) <= E_SESSION_DAYS;
-    if (session) { var sm = (s0 || rs[0].done || '').slice(0, 7); if (sm === ym) out.push({ kind: 'session', code: code, rows: rs }); }
+    if (session) { var sm = (s0 || rs.map(function (r) { return r.done; }).filter(String).sort()[0] || '').slice(0, 7); if (sm === ym) out.push({ kind: 'session', code: code, rows: rs }); }
     else { var mine = rs.filter(function (r) { return String(r.done).slice(0, 7) === ym; }); if (mine.length) out.push({ kind: 'ongoing', code: code, rows: mine }); }
   });
   return out;
+}
+/** 날짜가 없어 어느 달에도 넣을 수 없는 과정(줄) → [{kind, code, rows}]. 세션형은 시작일자도 이수일자도 없는 과정 전체, 상시·장기형은 이수일자가 빈 줄 */
+function eduUnplaced_(rows) {
+  var by = {}, order = [], out = [];
+  rows.forEach(function (r) { if (!by[r.code]) { by[r.code] = []; order.push(r.code); } by[r.code].push(r); });
+  order.forEach(function (code) {
+    var rs = by[code], s0 = rs.map(function (r) { return r.start; }).filter(String).sort()[0] || '', e0 = rs.map(function (r) { return r.end; }).filter(String).sort().pop() || '';
+    var session = !s0 || !e0 || eduDays_(s0, e0) <= E_SESSION_DAYS;
+    if (session) { if (!(s0 || rs.some(function (r) { return r.done; }))) out.push({ kind: 'session', code: code, rows: rs }); }
+    else { var no = rs.filter(function (r) { return !r.done; }); if (no.length) out.push({ kind: 'ongoing', code: code, rows: no }); }
+  });
+  return out;
+}
+/** 날짜는 있지만 주어진 달들(회계연도) 어디에도 안 들어가는 줄 수 = 다른 회계연도의 자료 */
+function eduOutside_(rows, months) {
+  var used = new Set(), un = new Set();
+  months.forEach(function (m) { eduMonth_(rows, m).forEach(function (c) { c.rows.forEach(function (r) { used.add(r); }); }); });
+  eduUnplaced_(rows).forEach(function (c) { c.rows.forEach(function (r) { un.add(r); }); });
+  return rows.filter(function (r) { return !used.has(r) && !un.has(r); }).length;
 }
 /** 회차 번호·날짜를 뗀 교육명: 같은 교육의 여러 차수를 한 줄로 묶는 열쇠 */
 function eduBase_(s) {
@@ -3128,7 +3149,7 @@ var api = {
     var owners = (S.init.owners || []).slice();
     Promise.all([call('apiVoucherSetup'), call('apiListProjects')].concat(owners.map(function (o) { return call('apiGetMonth', o, S.ym).catch(function () { return null; }); }))).then(function (r) {
       var mon = {}; owners.forEach(function (o, i) { var m = r[2 + i]; if (!m) return; var by = {}; (m.items || []).forEach(function (it) { by[it.project['사업ID']] = it.entry; }); mon[o] = { submitted: !!m.submitted, by: by }; });
-      VCH = { setup: r[0], ym: S.ym, stage: 'pick', file: null, edu: null, eduGroups: null, groups: null, aiCache: {}, aiOn: false, aiMsg: '', exclUn: false, mode: 'replace', remember: true, fillOther: true, oth: null, moCache: {}, moVal: {}, othFill: [], owners: owners, month: mon, sel: {}, ov: {},
+      VCH = { setup: r[0], ym: S.ym, stage: 'pick', file: null, edu: null, eduGroups: null, groups: null, aiCache: {}, aiOn: false, aiMsg: '', exclUn: false, mode: 'replace', remember: true, fillOther: true, un: { vch: [], edu: [], outEdu: 0, outVch: 0, dup: 0 }, oth: null, moCache: {}, moVal: {}, othFill: [], owners: owners, month: mon, sel: {}, ov: {},
         projects: r[1].filter(function (p) { return p['사용'] === 'Y'; }).map(function (p) { return { id: p['사업ID'], name: p['사업명'], cat: p['교육구분'], sub: p['세부구분'], owner: p['담당자'], mine: p['담당자'] === S.owner, cost: p['단위'] !== '지표' && p['비용행'] === 'Y',
           ppl: p['단위'] !== '지표' && p['인원행'] === 'Y', cnt: p['단위'] !== '지표', always: p['상시'] === 'Y', ext: /원외\s*(직무|보수)교육/.test(String(p['사업명'])) }; }) };
       VCH.sel[S.owner] = true;                                          // 처음에는 내 것만 선택 — 다른 담당자는 직접 골라야 입력된다
@@ -3192,7 +3213,7 @@ var api = {
         '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>담당자</th><th>기재사항 (교육명 단서)</th><th class="r">건</th><th class="r">금액(원)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="vBody"></tbody></table></div>' : '') +
       (V.edu ? '<h4 class="vh-h">교육이수현황 → 인원·차수 <small>(세션형은 강좌코드 1개 = 1차수, 달은 시작일자 · 상시·장기 과정은 이수일자의 달에 인원만)</small></h4><div class="vh-sum" id="vSumE"><span class="vs ok"><i></i>자동 ' + n(ec.auto) + '묶음</span><span class="vs mid"><i></i>확인 필요 ' + n(ec.check) + '묶음</span><span class="vs bad"><i></i>못 찾음 ' + n(ec.none) + '묶음</span>' + (info ? '' : '<span class="vh-aimsg" id="vAiMsg"></span>') + '</div>' +
         '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>담당자</th><th>교육 (계획서 · 교육구분)</th><th class="r">차수</th><th class="r">인원(명)</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody id="eBody"></tbody></table></div>' : '') +
-      '<div class="vh-tot" id="vTot"></div>' + '<div class="vh-oth" id="vOth"></div>' +
+      '<div class="vh-tot" id="vTot"></div>' + '<div class="vh-oth" id="vOth"></div>' + '<div class="vh-un" id="vJudge"></div>' +
       '<div class="vh-opt"><span>이미 입력된 값은</span><label><input type="radio" name="vMode" value="replace"' + (V.mode === 'replace' ? ' checked' : '') + '> 이번 값으로 <b>바꾸기</b></label><label><input type="radio" name="vMode" value="add"' + (V.mode === 'add' ? ' checked' : '') + '> 이번 값을 <b>더하기</b></label>' +
         '<label class="vh-chk" style="margin-left:auto"><input type="checkbox" id="vRem"' + (V.remember ? ' checked' : '') + '> 이번 매칭을 기억해 다음 달부터 자동으로 쓰기 (노란색 줄은 맞게 확인했을 때만)</label>' + (V.setup.mem.length ? '<a href="#" id="vForget">기억 ' + V.setup.mem.length + '건 지우기</a>' : '') + '</div>' +
       vchAiPanel() + '</div>';
@@ -3294,7 +3315,7 @@ var api = {
   // 사업별로 채울 값을 두 파일에서 종합한다 → { 사업id: { p, cost, ppl, cnt, fin:{절대값}, src:{} } }. all 이 참이면 담당자 선택과 무관하게(담당자 패널의 건수 표시용)
   //  · 비용 = 전표 줄 금액 합  · 인원 = 원외 직무·보수교육은 전표 줄 수(이름 목록은 이름 수), 그 밖은 교육이수현황의 이수 인원
   //  · 차수 = 「상시」 사업은 1 고정(값이 있는 달), 그 밖은 세션형 교육의 강좌코드 수 (원외 직무·보수교육은 건드리지 않음)
-  function vchCalc(all) { return vchCalcG(VCH.groups, VCH.eduGroups, all, false, true); }
+  function vchCalc(all) { var V = VCH; return vchCalcG((V.groups || []).concat(vchUnFor(V.ym, false)), (V.eduGroups || []).concat(vchUnFor(V.ym, true)), all, false, true); }
   // groups·eduGroups 를 사업별 값으로 합친다. onlyAuto: 자동 단계 묶음만(다른 달 채우기), useOv: 화면에서 직접 고친 값 반영(선택한 달만)
   function vchCalcG(groups, eduGroups, all, onlyAuto, useOv) {
     var V = VCH, plan = {}, ok = function (p) { return all || V.sel[p.owner]; }, good = function (g) { return !onlyAuto || vchLevel(g) === 'auto'; };
@@ -3359,7 +3380,7 @@ var api = {
     }); });
     $('#dlgSave').disabled = !ids.length;
     $('#dlgSave').textContent = others ? '채우기 (다른 담당자 ' + others + '건은 바로 저장)' : '채우기';
-    vchOwnUpdate(); vchOthers();
+    vchOwnUpdate(); vchOthers(); if (V.unSkip) V.unSkip = false; else vchUnList();
   }
 
   // ── 다른 달: 올린 파일에 다른 달 자료가 있으면, 그 달 실적 칸이 비어 있을 때만 채운다 (이미 입력된 칸은 건드리지 않는다)
@@ -3378,6 +3399,7 @@ var api = {
   function vchOthResolve(mo) {                                      // 선택한 달의 같은 문구 매칭·AI 판단을 이어받는다
     var V = VCH, sel = {}; (V.groups || []).concat(V.eduGroups || []).forEach(function (g) { sel[g.key] = g; });
     mo.groups.concat(mo.eduGroups).forEach(function (g) {
+      if (g.ownPick) return;                                        // 이 달 묶음을 사람이 직접 고른 경우는 그대로
       var s = sel[g.key];
       if (s) { g.pick = s.pick; g.user = s.user; g.src = s.src; g.conf = s.conf; g.level = s.level; return; }
       var r = V.aiCache[g.key]; if (!r || g.user || g.src === 'memory') return;
@@ -3396,16 +3418,19 @@ var api = {
   }
   function vchOthers() {
     var V = VCH, el = $('#vOth'); if (!el) return;
-    if (!V.oth || !V.oth.months.length) { el.innerHTML = ''; V.othFill = []; return; }
+    var months = V.oth ? V.oth.months.slice() : [];
+    vchUnAll().forEach(function (g) { if (g.ym && g.ym !== V.ym && !months.some(function (x) { return x.ym === g.ym; })) months.push({ ym: g.ym, groups: [], eduGroups: [] }); });       // 날짜 없는 자료를 직접 넣기로 한 달
+    months.sort(function (a, b) { return a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : 0; });
+    if (!months.length) { el.innerHTML = ''; V.othFill = []; return; }
     var tok = V.othTok = (V.othTok || 0) + 1, plans = [], need = {}, skipN = 0;
-    V.oth.months.forEach(function (mo) {
+    months.forEach(function (mo) {
       vchOthResolve(mo);
-      var plan = vchCalcG(mo.groups, mo.eduGroups, false, true, false);
+      var plan = vchCalcG(mo.groups.concat(vchUnFor(mo.ym, false)), mo.eduGroups.concat(vchUnFor(mo.ym, true)), false, true, false);
       mo.groups.concat(mo.eduGroups).forEach(function (g) { var p = g.pick && vchPrj(g.pick); if (p && V.sel[p.owner] && vchLevel(g) !== 'auto') skipN++; });
       Object.keys(plan).forEach(function (id) { need[mo.ym + '|' + plan[id].p.owner] = [mo.ym, plan[id].p.owner]; });
       plans.push({ ym: mo.ym, plan: plan });
     });
-    var head = '<h4>다른 달 — 비어 있는 칸 채우기 <small>(올린 파일의 ' + V.oth.months.map(function (mo) { return ymLabel(mo.ym); }).join('·') + ' 자료)</small></h4>' +
+    var head = '<h4>다른 달 — 비어 있는 칸 채우기 <small>(올린 파일의 ' + months.map(function (mo) { return ymLabel(mo.ym); }).join('·') + ' 자료)</small></h4>' +
       '<label class="vh-chk"><input type="checkbox" id="vOthOn"' + (V.fillOther ? ' checked' : '') + '> 다른 달 자료도, 그 달 실적 칸이 <b>비어 있으면</b> 함께 채우기 (이미 입력된 칸은 그대로 둡니다)</label>';
     var bind = function () { var c = $('#vOthOn', el); if (c) c.addEventListener('change', function () { V.fillOther = c.checked; vchOthers(); }); };
     if (!V.fillOther) { el.innerHTML = head; bind(); V.othFill = []; vchOthButton(); return; }
@@ -3435,7 +3460,7 @@ var api = {
         '<td>' + (f.submitted ? '<span class="vb warn">이미 제출함</span> ' : '') + '<span class="vb user">바로 저장</span></td></tr>';
     }).join('');
     el.innerHTML = head + (rows ? '<table class="vtot"><thead><tr><th>월</th><th>담당자</th><th>사업</th><th class="r">차수</th><th class="r">인원(명)</th><th class="r">비용(원)</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="muted">채울 빈 칸이 없습니다.</div>') +
-      '<div class="muted small">' + (kept ? '이미 입력된 ' + kept + '칸은 건드리지 않습니다. ' : '') + (skipN ? '확인이 필요한 ' + skipN + '묶음은 채우지 않았습니다 — 그 달로 옮겨 같은 파일을 올리면 확인하며 채울 수 있습니다. ' : '') + '채운 칸은 [채우기]를 누르면 바로 시트에 저장됩니다(담당자 선택 기준).</div>';
+      '<div class="muted small">' + (kept ? '이미 입력된 ' + kept + '칸은 건드리지 않습니다. ' : '') + (skipN ? '확인이 필요한 ' + skipN + '묶음은 아래 「직접 판단이 필요한 자료」에서 사업을 고르면 채웁니다. ' : '') + '채운 칸은 [채우기]를 누르면 바로 시트에 저장됩니다(담당자 선택 기준).</div>';
     bind(); vchOthButton();
   }
   function vchOthButton() {                                         // 선택한 달에 채울 것이 없어도 다른 달에 채울 것이 있으면 [채우기]를 쓸 수 있게
@@ -3444,6 +3469,59 @@ var api = {
     $('#dlgSave').disabled = !ids.length && !k;
     var others = ids.filter(function (id) { return !plan[id].p.mine; }).length;
     $('#dlgSave').textContent = others || k ? '채우기 (' + (others ? '다른 담당자 ' + others + '건' : '') + (others && k ? ' · ' : '') + (k ? '다른 달 ' + k + '건' : '') + '은 바로 저장)' : '채우기';
+  }
+
+  // ── 분류하지 못한 자료: 날짜가 없어 어느 달에도 못 넣은 줄, 다른 달에서 사업을 못 정한 묶음 → 사람이 직접 달·사업을 고른다
+  function vchUnBuild() {
+    var V = VCH, fy = S.init.months || [];
+    V.un = { vch: [], edu: [], outEdu: 0, outVch: 0, dup: V.edu ? (V.edu.dup || 0) : 0 };
+    if (V.file) {
+      var no = V.file.rows.filter(function (r) { return !r.ym && !(V.exclUn && /미/.test(r.approved || '')); });
+      if (no.length) { V.un.vch = vGroups_(no); vMatchGroups_(V.un.vch, V.projects, V.setup.mem); }
+      V.un.outVch = V.file.rows.filter(function (r) { return r.ym && fy.indexOf(r.ym) < 0; }).length;
+    }
+    if (V.edu) {
+      var cs = eduUnplaced_(V.edu.rows); if (cs.length) { V.un.edu = eduGroups_(cs); vMatchGroups_(V.un.edu, V.projects, V.setup.mem); }
+      V.un.outEdu = eduOutside_(V.edu.rows, fy);
+    }
+    var sel = {}; (V.groups || []).concat(V.eduGroups || []).forEach(function (g) { sel[g.key] = g; });
+    V.un.vch.concat(V.un.edu).forEach(function (g) { g.ym = ''; var s = sel[g.key]; if (s) { g.pick = s.pick; g.src = s.src; g.conf = s.conf; g.level = s.level; if (s.user) g.user = true; } });
+  }
+  function vchUnAll() { var u = VCH.un; return u ? u.vch.concat(u.edu) : []; }
+  function vchUnFor(ym, edu) { var u = VCH.un; return u && ym ? (edu ? u.edu : u.vch).filter(function (g) { return g.ym === ym; }) : []; }
+  function vchPicked(edu) {                                         // 사람이 따로 고른 묶음(날짜 없는 자료·다른 달) — 기억에 남길 대상
+    var out = vchUnAll().concat(vchOthAll()).filter(function (g) { return (g.ownPick || (g.ym && g.user)) && ((g.persons !== undefined) === edu); });
+    return out;
+  }
+  function vchUnList() {
+    var V = VCH, el = $('#vJudge'); if (!el) return;
+    var items = [];
+    vchUnAll().forEach(function (g) { items.push({ g: g, un: true }); });
+    if (V.oth) V.oth.months.forEach(function (mo) { mo.groups.concat(mo.eduGroups).forEach(function (g) { if (vchLevel(g) !== 'auto') items.push({ g: g, ym: mo.ym }); }); });
+    var u = V.un || {}, notes = [];
+    if (u.outEdu) notes.push('이수일자가 다른 회계연도인 이수 ' + n(u.outEdu) + '행');
+    if (u.outVch) notes.push('다른 회계연도의 전표 ' + n(u.outVch) + '줄');
+    if (u.dup) notes.push('같은 강좌·직원이 중복된 이수 ' + n(u.dup) + '줄');
+    if (!items.length && !notes.length) { el.innerHTML = ''; return; }
+    V.unRows = items;
+    var months = (S.init.months || []).filter(function (m) { return m <= S.init.currentYm; });
+    var rows = items.map(function (it, i) {
+      var g = it.g, edu = g.persons !== undefined, lv = vchLevel(g);
+      var mcell = it.un ? '<select data-um="' + i + '"><option value="">(넣지 않음)</option>' + months.map(function (m) { return '<option value="' + m + '"' + (g.ym === m ? ' selected' : '') + '>' + esc(ymLabel(m)) + '</option>'; }).join('') + '</select>' : esc(ymLabel(it.ym));
+      var size = edu ? '인원 ' + n(g.persons) + (g.sessions ? ' · 세션 ' + g.sessions : '') : n(g.rows.length) + '줄 · ' + n(g.amount) + '원';
+      var why = it.un ? (edu ? '날짜 없음' : '일자 없음') : (g.pick ? '확인 필요' : '못 찾음');
+      return '<tr class="lv-' + lv + '"><td class="dot"><i></i></td><td class="mo">' + mcell + '</td><td class="tx" title="' + esc(g.text) + '"><div>' + esc(g.text) + '</div><small>' + esc((edu ? '교육이수' : '전표') + ' · ' + why + (edu ? (g.cat ? ' · ' + g.cat : '') : (g.budget ? ' · ' + g.budget : ''))) + '</small></td>' +
+        '<td class="r num">' + size + '</td><td><select data-u="' + i + '">' + vchOptions(g) + '</select></td><td class="bd">' + vchBadge(g) + '</td></tr>';
+    }).join('');
+    el.innerHTML = '<h4>직접 판단이 필요한 자료 <small>(' + items.length + '묶음 — 달·사업을 고르면 위의 표에 더해집니다. 고르지 않으면 넣지 않습니다)</small></h4>' +
+      (rows ? '<div class="vtbl-wrap"><table class="vtbl"><thead><tr><th></th><th>달</th><th>내용</th><th class="r">규모</th><th>매칭 사업</th><th>근거</th></tr></thead><tbody>' + rows + '</tbody></table></div>' : '<div class="muted">직접 판단이 필요한 자료가 없습니다.</div>') +
+      (notes.length ? '<div class="muted small">이 회계연도 실적이 아니어서 넣지 않은 자료: ' + notes.join(' · ') + '</div>' : '');
+    $$('select[data-u]', el).forEach(function (sl) { sl.addEventListener('change', function () {
+      var it = V.unRows[+sl.dataset.u], g = it.g; g.pick = sl.value; g.user = true; g.ownPick = true; g.src = 'user';
+      var tr = sl.closest('tr'); tr.className = 'lv-' + vchLevel(g); $('.bd', tr).innerHTML = vchBadge(g);
+      V.unSkip = true; vchTotals();
+    }); });
+    $$('select[data-um]', el).forEach(function (sl) { sl.addEventListener('change', function () { V.unRows[+sl.dataset.um].g.ym = sl.value; V.unSkip = true; vchTotals(); }); });
   }
 
   function vchLoadFiles(files) {                                    // 전표·교육이수현황 파일을 읽어 종류를 자동으로 알아본다 (한 번에 두 개도 가능)
@@ -3469,7 +3547,7 @@ var api = {
     var V = VCH;
     if (V.file) { var rows = V.file.rows.filter(function (r) { return r.ym === V.ym && !(V.exclUn && /미/.test(r.approved || '')); }); V.groups = vGroups_(rows); vMatchGroups_(V.groups, V.projects, V.setup.mem); } else V.groups = null;
     if (V.edu) { V.eduGroups = eduGroups_(eduMonth_(V.edu.rows, V.ym)); vMatchGroups_(V.eduGroups, V.projects, V.setup.mem); } else V.eduGroups = null;
-    vchOthMonths(); V.moCache = {}; V.moVal = {};
+    vchOthMonths(); vchUnBuild(); V.moCache = {}; V.moVal = {};
     renderVoucher(); vchAi();
   }
 
@@ -3496,7 +3574,7 @@ var api = {
     var V = VCH, msg = $('#vAiMsg'); if (!msg) return;
     if (!vchKey()) { msg.textContent = 'AI 꺼짐 (키 없음) — 규칙 매칭만 사용'; return; }
     if (!V.aiOn) { msg.innerHTML = '<label class="vh-chk"><input type="checkbox" id="vAiOn"> AI로 애매한 줄 판단하기</label>'; $('#vAiOn').addEventListener('change', function (e) { if (e.target.checked) { var c = vchCfg(); c.consent = true; vchSaveCfg(c); V.aiOn = true; vchAi(); } }); return; }
-    var seenK = {}, todo = (V.groups || []).concat(V.eduGroups || []).concat(vchOthAll()).filter(function (g) { if (g.src === 'memory' || g.user || !g.ai || g.level === 'auto' || V.aiCache[g.key] || seenK[g.key]) return false; seenK[g.key] = 1; return true; }), kindOf = function (g) { return g.persons !== undefined ? '교육이수' : '전표'; };       // 전표 묶음 + 교육이수 묶음 (애매한 것만)
+    var seenK = {}, todo = (V.groups || []).concat(V.eduGroups || []).concat(vchOthAll()).concat(vchUnAll()).filter(function (g) { if (g.src === 'memory' || g.user || !g.ai || g.level === 'auto' || V.aiCache[g.key] || seenK[g.key]) return false; seenK[g.key] = 1; return true; }), kindOf = function (g) { return g.persons !== undefined ? '교육이수' : '전표'; };       // 전표 묶음 + 교육이수 묶음 (애매한 것만)
     if (!todo.length) { vchAiApply(); msg.textContent = 'AI 판단 반영됨' + (V.aiModel ? ' · 모델 ' + V.aiModel : ''); return; }
     var run = V.aiRun = (V.aiRun || 0) + 1, memEx = function (edu) { return V.setup.mem.filter(function (m) { return m.t && (edu ? m.sig.indexOf('E:') === 0 : m.sig.indexOf('B:') !== 0 && m.sig.indexOf('E:') !== 0); }).slice(0, 20).map(function (m) { return { t: m.t, name: m.name, edu: edu }; }); }, ex = memEx(false).concat(memEx(true));
     var working = function (t) {
@@ -3517,7 +3595,7 @@ var api = {
     });
   }
   function vchAiApply() {
-    (VCH.groups || []).concat(VCH.eduGroups || []).forEach(function (g) {
+    (VCH.groups || []).concat(VCH.eduGroups || []).concat(vchUnAll()).forEach(function (g) {
       var r = VCH.aiCache[g.key]; if (!r || g.user || g.src === 'memory') return;
       if (r.id && r.conf >= 0.8) { g.pick = r.id; g.src = 'ai'; g.conf = r.conf; g.level = 'auto'; }
       else if (r.id && r.conf >= 0.5) { g.pick = r.id; g.src = 'ai'; g.conf = r.conf; g.level = 'check'; }
@@ -3605,14 +3683,14 @@ var api = {
   }
   function vchRemember() {                                          // 확인한 매칭을 기억한다: 문구 → 사업, 예산명 → 사업(한 사업으로 80% 이상 몰릴 때), 교육(계획서+이름) → 사업
     var V = VCH, adds = [], byBud = {};
-    (V.groups || []).forEach(function (g) {
+    (V.groups || []).concat(vchPicked(false)).forEach(function (g) {
       var p = g.pick && vchPrj(g.pick); if (!p || !p.cost || !V.sel[p.owner]) return;       // 입력하기로 한 담당자의 사업만 기억 (선택하지 않은 담당자는 확인한 매칭이 아니므로)
       if (vBanned_(V.projects, g.kws, g.budget)[p.id]) return;     // 키워드·예산 조건에 맞지 않는데 사람이 직접 고른 사업(수탁교육 학회지원·원외 보수교육)은 기억하지 않는다 (다음에도 자동 배정하지 않음)
       if (g.sig && g.src !== 'memory' && g.ai) adds.push({ name: p.name, sig: g.sig, t: g.ai.slice(0, 60) });
       var b = vNorm_(g.budget); if (b) { var o = byBud[b] || (byBud[b] = { n: 0, by: {} }); o.n += g.rows.length; o.by[p.name] = (o.by[p.name] || 0) + g.rows.length; }
     });
     Object.keys(byBud).forEach(function (b) { var o = byBud[b], top = Object.keys(o.by).sort(function (x, y) { return o.by[y] - o.by[x]; })[0]; if (o.n >= 3 && o.by[top] / o.n >= 0.8) adds.push({ name: top, sig: 'B:' + b, t: '' }); });
-    (V.eduGroups || []).forEach(function (x) {                       // 교육이수 매칭: 이름·인원만 (사번·이름은 읽지도 저장하지도 않는다)
+    (V.eduGroups || []).concat(vchPicked(true)).forEach(function (x) {                       // 교육이수 매칭: 이름·인원만 (사번·이름은 읽지도 저장하지도 않는다)
       var p = x.pick && vchPrj(x.pick); if (!p || p.ext || !V.sel[p.owner] || !(p.ppl || p.cnt)) return;
       if (vBanned_(V.projects, x.kws, x.budget)[p.id]) return;
       if (x.sig && x.src !== 'memory') adds.push({ name: p.name, sig: x.sig, t: x.text.slice(0, 60) });
@@ -5067,7 +5145,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.14", last = 0, shown = false;
+  var APP_VER = "2026-10-12.15", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
