@@ -102,7 +102,7 @@ nav.tabs button { background: none; border: 0; color: rgba(255,255,255,.72); pad
 nav.tabs button[aria-selected="true"] { color: #fff; border-bottom-color: #8fc1ff; }
 nav.tabs button:hover { color: #fff; }
 nav.tabs button[data-tab="input"] { align-self: center; margin: 3px 14px 6px auto; padding: 10px 26px; font-size: 15.5px; line-height: 1.3; border: 0; border-radius: 11px; background: #ffd23f; color: #3b2d00; font-weight: 800; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
-nav.tabs .user-badge:not([hidden]) + button[data-tab="input"] { margin-left: 0; }          /* 이름 뱃지가 있으면 뱃지가 오른쪽으로 밀리고, 버튼은 늘 오른쪽 끝에 고정 */
+nav.tabs .user-badge:not([hidden]) ~ button[data-tab="input"], nav.tabs .btn-login:not([hidden]) ~ button[data-tab="input"] { margin-left: 0; }          /* 이름 뱃지가 있으면 뱃지가 오른쪽으로 밀리고, 버튼은 늘 오른쪽 끝에 고정 */
 nav.tabs button[data-tab="input"]:hover { background: #ffdf6b; color: #3b2d00; }
 nav.tabs button[data-tab="input"][aria-selected="true"] { background: #ffe066; color: #2f2400; box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(0,0,0,.3); }
 nav.tabs button[data-tab="input"]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
@@ -516,6 +516,8 @@ svg.chart .lbl { fill: var(--ink-2); font-size: 11px; font-weight: 700; }
 #login input[type="password"] { text-align: center; letter-spacing: .5em; font-size: 18px; }
 .user-badge { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 0 8px 3px auto; padding: 3px 11px 3px 9px; border-radius: 999px; border: 1px solid rgba(255,255,255,.38); background: rgba(255,255,255,.16); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .user-badge:hover { background: rgba(255,255,255,.28); }
+nav.tabs .btn-login { align-self: center; margin: 0 8px 3px auto; padding: 7px 17px; border-radius: 10px; border: 1px solid rgba(255,255,255,.6); background: rgba(255,255,255,.16); color: #fff; font-size: 13.5px; font-weight: 700; line-height: 1.3; cursor: pointer; white-space: nowrap; }
+nav.tabs .btn-login:hover { background: rgba(255,255,255,.3); color: #fff; } nav.tabs .btn-login:focus-visible { outline: 2px solid #8fc1ff; outline-offset: 2px; }
 .user-badge:focus-visible { outline: 2px solid #8fc1ff; outline-offset: 2px; }
 /* ── 회계연도 선택 (상단) · 신규연도 생성 */
 .yr { position: relative; align-self: center; }
@@ -689,6 +691,7 @@ table.tree tr.just-moved td { animation: movedflash 1.8s ease-out; }
     <button role="tab" data-tab="dash" aria-selected="true">대시보드</button>
     <button role="tab" data-tab="systems" aria-selected="false">교육체계관리</button>
     <button role="tab" data-tab="report" aria-selected="false">실적표</button>
+    <button type="button" id="btnLogin" class="btn-login" hidden aria-label="로그인">로그인</button>
     <button type="button" id="userBadge" class="user-badge" hidden aria-label="로그인한 담당자 — 눌러서 비밀번호 변경·로그아웃" title="비밀번호 변경 · 로그아웃"><i class="ub-dot" aria-hidden="true"></i><span id="userBadgeName"></span></button>
     <button role="tab" data-tab="input" aria-selected="false">내 교육 관리</button>
   </nav>
@@ -2911,7 +2914,7 @@ var api = {
     if (!confirmLeave()) { e.target.value = S.ym; return; }
     S.ym = e.target.value; S.dirty = {}; refresh();
   });
-  $$('nav.tabs button').forEach(function (b) {
+  $$('nav.tabs button[data-tab]').forEach(function (b) {
     b.addEventListener('click', function () {
       var tab = b.dataset.tab;
       if (S.tab === 'input' && tab !== 'input' && !confirmLeave()) return;
@@ -3401,7 +3404,7 @@ var api = {
     var next = AUTH.afterLogin; AUTH.afterLogin = null;
     if (next) next(); else if (S.tab === 'input') showTab('input'); else refresh();
   }
-  function setBadge(name) { $('#userBadgeName').textContent = leaderLabel_(name || ''); $('#userBadge').hidden = !name; if (window.__kpiBar) window.__kpiBar(); }       // 로그인·로그아웃에 따라 시트 연결 화면(관리자만)도 다시 그린다
+  function setBadge(name) { $('#userBadgeName').textContent = leaderLabel_(name || ''); $('#userBadge').hidden = !name; $('#btnLogin').hidden = !!name || AUTH.noauth; if (window.__kpiBar) window.__kpiBar(); }       // 로그인·로그아웃에 따라 시트 연결 화면(관리자만)도 다시 그린다
   function logout() {
     AUTH.user = ''; AUTH.afterLogin = null; S.dash = null; S.report = null; S.month = null; S.ins = null; S.dirty = {};
     try { sessionStorage.removeItem('kpi.sess'); localStorage.removeItem('kpi.keep'); } catch (e) {}
@@ -3467,13 +3470,14 @@ var api = {
   $('#lgName').addEventListener('change', function () { $('#lgErr').textContent = ''; $('#lgPin').value = ''; $('#lgPin2').value = ''; syncLogin(); });
   [$('#lgPin'), $('#lgPin2')].forEach(function (el) { el.addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); }); });
   $('#userBadge').addEventListener('click', function () { if (AUTH.user) openAccount(); });
+  $('#btnLogin').addEventListener('click', function () { if (!AUTH.user) { AUTH.afterLogin = null; showLogin(); } });       // 로그인 뒤에는 보던 화면 그대로 (권한이 바뀐 화면은 다시 그린다)
   $('#lgCancel').addEventListener('click', function () { AUTH.afterLogin = null; $('#login').classList.remove('show'); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $('#login').classList.contains('show')) { AUTH.afterLogin = null; $('#login').classList.remove('show'); } });
 
   function ymVis() { $('#selYm').parentNode.style.visibility = (S.tab === 'input' && S.mineView === 'input') ? 'visible' : 'hidden'; }
   function showTab(tab) {
     S.tab = tab; if (tab !== 'input') { S.dirty = {}; S.focus = null; updateSavebar(); }
-    $$('nav.tabs button').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'); });
+    $$('nav.tabs button[data-tab]').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'); });
     $$('.panel').forEach(function (p) { p.classList.toggle('on', p.id === 'p-' + tab); });
     document.body.classList.toggle('wide', tab === 'report');
     ymVis();
@@ -4574,7 +4578,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.6", last = 0, shown = false;
+  var APP_VER = "2026-10-12.7", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
