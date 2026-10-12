@@ -7,6 +7,7 @@
 // 웹 배포본: 페이지 전체 비밀번호. 맞으면 이 브라우저에 기억(해시만 저장)해 다시 묻지 않는다. 풀기 전에는 시트 요청을 보내지 않는다(remote1 이 __GATE 를 기다림).
 (function () {
   var H = "47419e6953fb401b6104e7caa10c96b34a81f78aa77ecc1ca7317968f8ab8459", KEY = 'kpi.gate', fails = 0, unlock;
+  window.__WEB_BUILD = true;   // 웹 배포본 표시: 시트 연결 화면은 관리자만 본다
   window.__GATE = new Promise(function (r) { unlock = r; });
   function remembered() { try { return localStorage.getItem(KEY) === H; } catch (e) { return false; } }
   if (remembered()) { unlock(); return; }
@@ -86,6 +87,7 @@ nav.tabs button { background: none; border: 0; color: rgba(255,255,255,.72); pad
 nav.tabs button[aria-selected="true"] { color: #fff; border-bottom-color: #8fc1ff; }
 nav.tabs button:hover { color: #fff; }
 nav.tabs button[data-tab="input"] { align-self: center; margin: 3px 14px 6px auto; padding: 10px 26px; font-size: 15.5px; line-height: 1.3; border: 0; border-radius: 11px; background: #ffd23f; color: #3b2d00; font-weight: 800; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+nav.tabs .user-badge:not([hidden]) + button[data-tab="input"] { margin-left: 0; }          /* 이름 뱃지가 있으면 뱃지가 오른쪽으로 밀리고, 버튼은 늘 오른쪽 끝에 고정 */
 nav.tabs button[data-tab="input"]:hover { background: #ffdf6b; color: #3b2d00; }
 nav.tabs button[data-tab="input"][aria-selected="true"] { background: #ffe066; color: #2f2400; box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(0,0,0,.3); }
 nav.tabs button[data-tab="input"]:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
@@ -491,7 +493,7 @@ svg.chart .lbl { fill: var(--ink-2); font-size: 11px; font-weight: 700; }
 #login .lg-rst small { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.45; }
 #login .lg-sub { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; }
 #login input[type="password"] { text-align: center; letter-spacing: .5em; font-size: 18px; }
-.user-badge { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 0 14px 3px -4px; padding: 3px 11px 3px 9px; border-radius: 999px; border: 1px solid rgba(255,255,255,.38); background: rgba(255,255,255,.16); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.user-badge { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 0 8px 3px auto; padding: 3px 11px 3px 9px; border-radius: 999px; border: 1px solid rgba(255,255,255,.38); background: rgba(255,255,255,.16); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .user-badge:hover { background: rgba(255,255,255,.28); }
 .user-badge:focus-visible { outline: 2px solid #8fc1ff; outline-offset: 2px; }
 /* ── 회계연도 선택 (상단) · 신규연도 생성 */
@@ -666,8 +668,8 @@ table.tree tr.just-moved td { animation: movedflash 1.8s ease-out; }
     <button role="tab" data-tab="dash" aria-selected="true">대시보드</button>
     <button role="tab" data-tab="systems" aria-selected="false">교육체계관리</button>
     <button role="tab" data-tab="report" aria-selected="false">실적표</button>
-    <button role="tab" data-tab="input" aria-selected="false">내 교육 관리</button>
     <button type="button" id="userBadge" class="user-badge" hidden aria-label="로그인한 담당자 — 눌러서 비밀번호 변경·로그아웃" title="비밀번호 변경 · 로그아웃"><i class="ub-dot" aria-hidden="true"></i><span id="userBadgeName"></span></button>
+    <button role="tab" data-tab="input" aria-selected="false">내 교육 관리</button>
   </nav>
 </header>
 
@@ -969,13 +971,14 @@ table.tree tr.just-moved td { animation: movedflash 1.8s ease-out; }
     else if (mode === 'sheet' && failedOps.length) h = '<span class="fb warn">▲ 시트에 저장하지 못한 변경이 ' + failedOps.length + '건 있습니다. 다시 저장하기 전에는 다른 사람에게 보이지 않습니다.</span><span class="fb-sp"></span><button class="primary" data-fb="resave">다시 저장</button>';
     else if (mode === 'sheet' && pending > 0) h = '<span class="fb ok">● 시트에 저장하는 중…</span><span class="fb-sp"></span>';
     else if (mode === 'sheet' && stale) h = '<span class="fb ok">● 최신 내용을 시트에서 불러오는 중… (지난번 내용을 먼저 보여 드립니다)</span><span class="fb-sp"></span>';
-    else if (mode === 'sheet') h = '<span class="fb ok">● 공유 시트에 저장 중' + (savedAt ? ' · ' + savedAt + ' 확인' : '') + '</span><span class="fb-sp"></span><button data-fb="backup">백업 내려받기</button>' + (BAKED_URL ? '' : '<button data-fb="unlink">시트 주소 바꾸기</button>');
-    else if (mode === 'sheeterr') h = '<span class="fb warn">▲ 공유 시트에 연결하지 못했습니다. 저장할 수 없습니다.</span><span class="fb-sp"></span><button class="primary" data-fb="retry">다시 연결</button>' + (BAKED_URL ? '' : '<button data-fb="unlink">시트 주소 바꾸기</button>');
+    else if (mode === 'sheet') h = '<span class="fb ok">● 공유 시트에 저장 중' + (savedAt ? ' · ' + savedAt + ' 확인' : '') + '</span><span class="fb-sp"></span><button data-fb="backup">백업 내려받기</button>' + (BAKED_URL || !canConn() ? '' : '<button data-fb="unlink">시트 주소 바꾸기</button>');
+    else if (mode === 'sheeterr') h = '<span class="fb warn">▲ 공유 시트에 연결하지 못했습니다. 저장할 수 없습니다.</span><span class="fb-sp"></span><button class="primary" data-fb="retry">다시 연결</button>' + (BAKED_URL || !canConn() ? '' : '<button data-fb="unlink">시트 주소 바꾸기</button>');
     else if (mode === 'file') h = '<span class="fb ok">● 공유 파일에 저장 중 — ' + esc(handle.name) + (savedAt ? ' · 마지막 저장 ' + savedAt : '') + '</span><span class="fb-sp"></span><button data-fb="backup">백업 내려받기</button>' + (can ? '<button data-fb="open">다른 파일 연결</button>' : '');
     else if (mode === 'needperm') h = '<span class="fb warn">▲ 공유 파일 \'' + esc(handle.name) + '\' 연결 확인이 필요합니다. 확인 전에는 저장할 수 없습니다.</span><span class="fb-sp"></span><button class="primary" data-fb="grant">연결 허용</button><button data-fb="open">다른 파일 연결</button>';
+    else if (!canConn()) h = '<span class="fb warn">○ 공유 시트에 연결되어 있지 않습니다 — 관리자가 보낸 접속 링크로 열어 주세요</span>';
     else h = '<span class="fb warn">○ 이 브라우저에만 저장 중 — 팀원과 같은 데이터를 쓰려면 공유 시트를 연결하세요</span><span class="fb-sp"></span>' + urlBox +
       (can ? '<button data-fb="open">공유 파일 열기</button><button data-fb="new">새 공유 파일</button>' : '') + '<button data-fb="backup">백업 내려받기</button>';
-    if ((mode === 'sheeterr' || showUrl) && !BAKED_URL && h.indexOf('fbUrl') < 0) h += '<div class="fb-row">' + urlBox + '</div>';
+    if ((mode === 'sheeterr' || showUrl) && !BAKED_URL && canConn() && h.indexOf('fbUrl') < 0) h += '<div class="fb-row">' + urlBox + '</div>';
     if (err) h += '<div class="fb err">' + esc(err) + '</div>';
     var keep = $('#fbUrl') ? $('#fbUrl').value : '';
     el.innerHTML = h;
@@ -988,6 +991,9 @@ table.tree tr.just-moved td { animation: movedflash 1.8s ease-out; }
     else if (k === 'url') connectSheet($('#fbUrl') && $('#fbUrl').value); else if (k === 'seed') seedSheet(); else if (k === 'retry') reconnectSheet(); else if (k === 'resave') resave(); else if (k === 'unlink') disconnectSheet();
   });
   function mountBar() { var h = $('header.top'); if (h && !$('#fileBar')) h.insertAdjacentHTML('afterend', '<div id="fileBar"></div>'); renderBar(); paintBoot(); }
+  // 시트 연결(주소 입력·바꾸기)을 볼 수 있는 사람: 관리자만 (관리자 지정 전에는 예전처럼 누구나, 웹 배포본은 관리자만). 판단은 두 번째 script 가 정의한다.
+  function canConn() { var f = window.__kpiCanConnect; return typeof f === 'function' ? !!f() : !window.__WEB_BUILD; }
+  window.__kpiBar = function () { renderBar(); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountBar); else mountBar();
 
   // ── 다른 사람이 바꾼 내용 반영 (15초마다·창을 다시 누를 때)
@@ -2490,13 +2496,16 @@ function writePin_(owner, rec) {
   return run.then(function () { D.pinsDoc = Object.assign({}, D.pinsDoc || {}, d); return { ok: true, rec: rec }; }, function (e) { return { ok: false, errors: [writeFail_(e)] }; });
 }
 
-// 팀장 비밀번호 초기화 번호키(숫자 4자리)의 해시. 번호키 자체는 이 파일에 적혀 있지 않다.
+// 번호키 초기화(관리자 계정, 관리자 지정 전에는 팀장 계정)에 쓰는 번호키(숫자 4자리)의 해시. 번호키 자체는 이 파일에 적혀 있지 않다.
 var LEADER_RESET_HASH = 'b82cb4ff368e3db4dc03c5160f384f9a09b0f17f92cc11cee61a64f6d026cc75';
 var __rst = { fails: 0, until: 0 };
 
 /** 전표 매칭 기억: 줄마다 '사업명<TAB>문구열쇠<TAB>예시문구'. 열쇠가 'B:'로 시작하면 「예산명 → 사업」. 받는 사람 이름·금액은 저장하지 않는다. */
 function parseVmap_(text) { return String(text == null ? '' : text).split('\n').map(function (l) { return l.split('\t'); }).filter(function (f) { return f[0] && f[1]; }).map(function (f) { return { name: f[0], sig: f[1], t: f[2] || '' }; }); }
 function stringifyVmap_(list) { return list.map(function (m) { return [m.name, m.sig, String(m.t || '').replace(/[\t\n]/g, ' ')].join('\t'); }).join('\n'); }
+
+/** 관리자 = 설정 시트(config/main)의 「관리자」 열(쉼표로 여러 명). 비어 있으면 빈 목록(= 예전 방식) */
+function adminNames_() { try { return String(dataConfig_()['관리자'] || '').split(',').map(function (x) { return x.trim(); }).filter(String); } catch (e) { return []; } }
 
 var api = {
   // ── 담당자별 비밀번호 (4자리). 시트에는 해시만 저장한다.
@@ -2509,15 +2518,19 @@ var api = {
     if (cur && !checkPin_(owner, oldPin, cur)) return Promise.resolve({ ok: false, errors: ['현재 비밀번호가 맞지 않습니다.'] });
     return writePin_(owner, makePinRecord_(owner, String(pin)));
   },
-  /** 팀장만 다른 담당자의 비밀번호를 초기화할 수 있다 (초기화하면 그 담당자가 다음 접속 때 새로 정한다) */
+  /** 비밀번호 초기화 권한: 설정의 「관리자」가 있으면 관리자만, 없으면 팀장만. 초기화하면 그 담당자가 다음 접속 때 새로 정한다 */
   apiResetPin: function (owner, by) {
-    if (by !== '팀장') return Promise.resolve({ ok: false, errors: ['팀장만 초기화할 수 있습니다.'] });
-    return writePin_(owner, '');
-  },
-  /** 팀장 비밀번호 초기화: 번호키를 맞게 넣으면 팀장 비밀번호를 비운다 (다음 접속 때 새로 정한다). 5번 틀리면 30초 잠금 */
-  apiResetLeaderPin: function (code) {
     return whenReady_().then(function () {
-      if (!String(dataConfig_()['팀장'] || '').trim()) return { ok: false, errors: ['팀장 계정이 설정되어 있지 않습니다.'] };
+      var ad = adminNames_(), ok = ad.length ? ad.indexOf(by) >= 0 : by === '팀장';
+      if (!ok) return { ok: false, errors: [ad.length ? '관리자만 초기화할 수 있습니다.' : '팀장만 초기화할 수 있습니다.'] };
+      return writePin_(owner, '');
+    });
+  },
+  /** 번호키로 비밀번호 초기화(관리자 계정이 자기 비밀번호를 잊었을 때; 관리자 지정 전에는 팀장 계정). 번호키를 맞게 넣으면 그 계정 비밀번호를 비운다. 5번 틀리면 30초 잠금 */
+  apiResetPinByKey: function (name, code) {
+    return whenReady_().then(function () {
+      var ad = adminNames_(), allowed = ad.length ? ad.indexOf(name) >= 0 : (name === '팀장' && !!String(dataConfig_()['팀장'] || '').trim());
+      if (!allowed) return { ok: false, errors: [ad.length ? '관리자 계정만 번호키로 초기화할 수 있습니다.' : '팀장 계정이 설정되어 있지 않습니다.'] };
       if (Date.now() < __rst.until) return { ok: false, errors: ['여러 번 틀렸습니다. ' + Math.ceil((__rst.until - Date.now()) / 1000) + '초 뒤에 다시 시도하세요.'] };
       if (!validPin_(code) || sha256_('kpi-leader-reset:' + code) !== LEADER_RESET_HASH) {
         __rst.fails++;
@@ -2525,7 +2538,7 @@ var api = {
         return { ok: false, errors: ['번호키가 맞지 않습니다. (' + __rst.fails + '/5)'] };
       }
       __rst.fails = 0;
-      return writePin_('팀장', '');
+      return writePin_(name, '');
     });
   },
   /** 끌어서 옮긴 결과 저장. tree: [{cat, subs:[{key:'원래 교육구분|세부구분', sub, pids:[사업ID…]}]}] (화면에 보이는 순서 그대로)
@@ -3230,6 +3243,10 @@ var api = {
   var AUTH = { noauth: !!window.__KPI_NOAUTH, user: '', fails: {}, lockUntil: 0, afterLogin: null };
   function me() { return AUTH.noauth ? S.owner : AUTH.user; }
   function ownerNames() { var n = S.init.owners.slice(); if (S.init.leader) n.push('팀장'); return n; }
+  // 관리자 판단은 adminNames_()(모델 쪽, 설정 시트의 「관리자」 열). 지정되어 있으면 시트 연결·비밀번호 초기화는 관리자만, 비어 있으면 예전 방식(팀장)
+  function isAdminUser_(n) { return !!n && adminNames_().indexOf(n) >= 0; }
+  function canReset_(n) { return adminNames_().length ? isAdminUser_(n) : n === '팀장'; }
+  window.__kpiCanConnect = function () { if (AUTH.noauth) return true; var ad = adminNames_(); if (!window.__WEB_BUILD && !ad.length) return true; return isAdminUser_(AUTH.user); };
   function onlyDigits(el) { el.addEventListener('input', function () { var v = el.value.replace(/\D/g, '').slice(0, 4); if (v !== el.value) el.value = v; }); }
   function showLogin() {
     var names = ownerNames();
@@ -3240,7 +3257,7 @@ var api = {
     syncLogin(); setTimeout(function () { $('#lgPin').focus(); }, 50);
   }
   function syncLogin() {
-    $('#lgRstRow').hidden = $('#lgName').value !== '팀장'; if ($('#lgRstRow').hidden) { $('#lgRstBox').hidden = true; $('#lgRstKey').value = ''; }       // 초기화 버튼은 팀장을 골랐을 때만
+    $('#lgRstRow').hidden = !canReset_($('#lgName').value); $('#lgRstOpen').textContent = adminNames_().length ? '관리자 정보(비밀번호) 초기화' : '팀장 정보(비밀번호) 초기화'; $('#lgRstOpen').title = adminNames_().length ? '관리자 비밀번호를 잊었을 때' : '팀장 비밀번호를 잊었을 때'; if ($('#lgRstRow').hidden) { $('#lgRstBox').hidden = true; $('#lgRstKey').value = ''; }       // 초기화 버튼은 팀장을 골랐을 때만
     return call('apiPinStatus', $('#lgName').value).then(function (r) {
       $('#lgPin2Row').hidden = r.set;
       $('#lgSub').textContent = r.set ? '비밀번호(숫자 4자리)를 입력하세요.' : '처음 접속하는 이름입니다. 앞으로 쓸 비밀번호 숫자 4자리를 정하세요.';
@@ -3279,7 +3296,7 @@ var api = {
     var next = AUTH.afterLogin; AUTH.afterLogin = null;
     if (next) next(); else if (S.tab === 'input') showTab('input'); else refresh();
   }
-  function setBadge(name) { $('#userBadgeName').textContent = name || ''; $('#userBadge').hidden = !name; }
+  function setBadge(name) { $('#userBadgeName').textContent = name || ''; $('#userBadge').hidden = !name; if (window.__kpiBar) window.__kpiBar(); }       // 로그인·로그아웃에 따라 시트 연결 화면(관리자만)도 다시 그린다
   function logout() {
     AUTH.user = ''; AUTH.afterLogin = null; S.dash = null; S.report = null; S.month = null; S.ins = null; S.dirty = {};
     try { sessionStorage.removeItem('kpi.sess'); localStorage.removeItem('kpi.keep'); } catch (e) {}
@@ -3297,7 +3314,7 @@ var api = {
     }).catch(function () { showTab('dash'); });
   }
   function openAccount() {
-    var isL = AUTH.user === '팀장', names = S.init.owners;
+    var isL = canReset_(AUTH.user), names = adminNames_().length ? ownerNames() : S.init.owners;
     $('#dlgTitle').textContent = '내 계정 · ' + AUTH.user; $('#dlgErr').textContent = '';
     $('#dlgBody').innerHTML = '<div class="form"><div class="f s6"><b>비밀번호 변경</b></div>' +
       '<div class="f s2"><label for="acOld">현재 비밀번호</label><input id="acOld" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></div>' +
@@ -3330,11 +3347,12 @@ var api = {
     var err = $('#lgErr'), key = $('#lgRstKey').value.trim();
     if (!/^\d{4}$/.test(key)) { err.textContent = '초기화 번호키는 숫자 4자리입니다.'; return; }
     $('#lgRstGo').disabled = true; err.textContent = '';
-    call('apiResetLeaderPin', key).then(function (r) {
+    var rstName = $('#lgName').value;
+    call('apiResetPinByKey', rstName, key).then(function (r) {
       $('#lgRstKey').value = '';
       if (!r.ok) { err.textContent = r.errors.join(' '); return; }
       $('#lgRstBox').hidden = true; $('#lgPin').value = ''; $('#lgPin2').value = '';
-      toast('팀장 비밀번호를 초기화했습니다. 새 비밀번호를 정해 로그인하세요.');
+      toast(rstName + ' 비밀번호를 초기화했습니다. 새 비밀번호를 정해 로그인하세요.');
       return syncLogin().then(function () { $('#lgPin').focus(); });
     }).catch(function (e) { err.textContent = (e && e.message) || String(e); }).then(function () { $('#lgRstGo').disabled = false; });
   }
@@ -4442,7 +4460,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.3", last = 0, shown = false;
+  var APP_VER = "2026-10-12.4", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
