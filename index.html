@@ -3299,7 +3299,13 @@ var api = {
     var sh = function (d) { return d.slice(5); };
     return '<td class="vdt" title="' + esc(a === b ? a : a + ' ~ ' + b) + '">' + esc(sh(a)) + (a === b ? '' : '<br><small>~ ' + esc(sh(b)) + '</small>') + '</td>';
   }
-  function vchHidden(g) { var p = g.pick && vchPrj(g.pick); return !!p && !VCH.sel[p.owner]; }       // 선택하지 않은 담당자의 사업으로 매칭된 줄은 표에서 숨긴다
+  // 선택하지 않은 담당자의 줄은 표에서 숨긴다: 사업이 정해졌으면 그 사업의 담당자, 아직 못 정했으면 후보(점수가 낮은 후보 포함) 사업들의 담당자가 모두 선택되지 않았을 때.
+  // 후보조차 하나도 없는 줄은 누구 것인지 알 수 없으므로 항상 보인다.
+  function vchHidden(g) {
+    var p = g.pick && vchPrj(g.pick); if (p) return !VCH.sel[p.owner];
+    if (g.user || !g.cands || !g.cands.length) return false;            // 사람이 직접 「제외」한 줄·후보 없는 줄은 보인다
+    return g.cands.every(function (c) { var q = vchPrj(c.id); return !!q && !VCH.sel[q.owner]; });
+  }
   function vchHidNote(sumSel, k, unit) {                              // 요약 줄 끝에 「숨긴 줄 수」 안내
     var sum = $(sumSel); if (!sum) return;
     var hn = $('.vh-hid', sum); if (!hn) { hn = document.createElement('span'); hn.className = 'vh-hid muted small'; sum.insertBefore(hn, $('.vh-aimsg', sum)); }
@@ -5174,7 +5180,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.20", last = 0, shown = false;
+  var APP_VER = "2026-10-12.21", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
