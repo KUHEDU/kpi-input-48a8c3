@@ -428,7 +428,7 @@ td.ap.go:hover .ap-btn { border-color: #c0392b; color: #c0392b; }
 .vtbl td.vdt { white-space: nowrap; font-size: 12.5px; font-variant-numeric: tabular-nums; } .vtbl td.vdt small { color: var(--ink-3); font-size: 11px; }
 .vtbl td.own { white-space: nowrap; font-weight: 600; font-size: 12.5px; } .vtbl td.own small { font-weight: 400; color: var(--ink-3); }
 .vh-oth { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-oth h4 { margin: 0 0 6px; font-size: 14px; } .vh-oth h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-oth .vh-chk { margin: 6px 0 10px; } .vh-oth table.vtot { margin-bottom: 6px; }
-.vh-un { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-un h4 { margin: 0 0 8px; font-size: 14px; } .vh-un h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-un .vtbl-wrap { max-height: 360px; overflow: auto; } .vh-un td.mo { white-space: nowrap; } .vh-un small.dref { display: block; color: var(--ink-2); font-size: 11px; margin-top: 2px; } .vh-un td.mo select { max-width: 120px; }
+.vh-un { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--line-strong); } .vh-un h4 { margin: 0 0 8px; font-size: 14px; } .vh-un h4 small { font-weight: 500; color: var(--ink-3); font-size: 12px; } .vh-un .vtbl-wrap { max-height: 360px; overflow: auto; } .vh-un td.mo { white-space: nowrap; } .vh-un small.dref.rel { color: #8a4b00; font-weight: 600; } .vh-un small.dref { display: block; color: var(--ink-2); font-size: 11px; margin-top: 2px; } .vh-un td.mo select { max-width: 120px; }
 .vh-own { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
 .vh-own > b { margin-right: 4px; }
 .vh-own label.oc { display: inline-flex; gap: 6px; align-items: center; padding: 4px 11px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); cursor: pointer; }
@@ -3522,6 +3522,24 @@ var api = {
     var lead = g.rows.map(function (r) { var m = String(r.text || '').match(/^\s*(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/); return m ? m[1] + '/' + m[2] : ''; }).filter(String)[0];
     return [ds.length ? '전표일자 ' + rg(ds[0], ds[ds.length - 1]) : '전표일자 없음', lead ? '기재사항 앞 날짜 ' + lead : '', lines.length ? '파일 ' + lines.join('·') + '번째 줄' + (g.rows.length > lines.length ? ' 외' : '') : ''].filter(String).join(' · ');
   }
+  // 이수일자가 없는 교육은 언제 처리한 것인지 알 수 없으므로, 같은 교육으로 보이는 전표(교육명이 기재사항에 들어 있는 전표)의 전표일자를 참고로 보여 준다
+  function vchRelRef(g) {
+    var V = VCH; if (g.persons === undefined || (g.d0 && !g.noDone)) return '';
+    if (!V.file) return '관련 전표일자: 전표 파일을 함께 올리면 같은 교육의 전표일자를 보여 줍니다';
+    if (!V.vIdx) V.vIdx = V.file.rows.map(function (r) { var t = vAiText_(vMask_(r.clean || vClean_(r.text))); return { r: r, t: t, b: vBigrams_(vNorm_(t)) }; });
+    var A = vBigrams_(vNorm_(g.ai || g.text).replace(/\d+/g, '')), ks = Object.keys(A);
+    if (ks.length < 4) return '관련 전표일자: 교육명이 짧아 같은 교육의 전표를 찾지 못했습니다';
+    var hits = [];
+    V.vIdx.forEach(function (x) { var h = 0; ks.forEach(function (k) { if (x.b[k]) h++; }); var sc = h / ks.length; if (sc >= 0.7) hits.push({ sc: sc, d: x.r.date || '일자 없음', t: x.t }); });
+    if (!hits.length) {                                             // 같은 교육의 전표가 없으면, 매칭된 사업에 딸린 전표가 어느 달에 몰려 있는지라도 보여 준다
+      var pj = g.pick && vchPrj(g.pick), mc = {}, any = 0;
+      if (pj) (V.groups || []).concat(vchOthAll(), V.un ? V.un.vch : []).forEach(function (g2) { if (g2.pick === g.pick && g2.rows) g2.rows.forEach(function (r) { var m = (r.date || '').slice(0, 7) || '일자 없음'; mc[m] = (mc[m] || 0) + 1; any++; }); });
+      if (!any) return '관련 전표일자: 같은 교육으로 보이는 전표가 없습니다';
+      return '관련 전표일자: 같은 교육의 전표 없음 · 같은 사업(' + pj.name.split(' (')[0].slice(0, 12) + ')의 전표 ' + Object.keys(mc).sort().map(function (m) { return (/^\d{4}-\d{2}$/.test(m) ? Number(m.slice(5)) + '월' : m) + ' ' + mc[m] + '줄'; }).join(' · ') + ' (참고)';
+    }
+    hits.sort(function (a, b) { return b.sc - a.sc || (a.d < b.d ? -1 : 1); });
+    return '관련 전표일자: ' + hits.slice(0, 3).map(function (h) { return h.d + ' 「' + h.t.slice(0, 22) + (h.t.length > 22 ? '…' : '') + '」'; }).join(' · ') + (hits.length > 3 ? ' 외 ' + (hits.length - 3) + '건' : '');
+  }
   function vchUnList() {
     var V = VCH, el = $('#vJudge'); if (!el) return;
     var items = [];
@@ -3539,7 +3557,7 @@ var api = {
       var mcell = it.un ? '<select data-um="' + i + '"><option value="">(넣지 않음)</option>' + months.map(function (m) { return '<option value="' + m + '"' + (g.ym === m ? ' selected' : '') + '>' + esc(ymLabel(m)) + '</option>'; }).join('') + '</select>' : esc(ymLabel(it.ym));
       var size = edu ? '인원 ' + n(g.persons) + (g.sessions ? ' · 세션 ' + g.sessions : '') : n(g.rows.length) + '줄 · ' + n(g.amount) + '원';
       var why = it.un ? (edu ? '날짜 없음' : '일자 없음') : (g.pick ? '확인 필요' : '못 찾음');
-      return '<tr class="lv-' + lv + '"><td class="dot"><i></i></td><td class="mo">' + mcell + '</td><td class="tx" title="' + esc(g.text) + '"><div>' + esc(g.text) + '</div><small>' + esc((edu ? '교육이수' : '전표') + ' · ' + why + (edu ? (g.cat ? ' · ' + g.cat : '') : (g.budget ? ' · ' + g.budget : ''))) + '</small><small class="dref">' + esc(vchDateRef(g)) + '</small></td>' +
+      return '<tr class="lv-' + lv + '"><td class="dot"><i></i></td><td class="mo">' + mcell + '</td><td class="tx" title="' + esc(g.text) + '"><div>' + esc(g.text) + '</div><small>' + esc((edu ? '교육이수' : '전표') + ' · ' + why + (edu ? (g.cat ? ' · ' + g.cat : '') : (g.budget ? ' · ' + g.budget : ''))) + '</small><small class="dref">' + esc(vchDateRef(g)) + '</small>' + (function () { var rl = vchRelRef(g); return rl ? '<small class="dref rel">' + esc(rl) + '</small>' : ''; })() + '</td>' +
         '<td class="r num">' + size + '</td><td><select data-u="' + i + '">' + vchOptions(g) + '</select></td><td class="bd">' + vchBadge(g) + '</td></tr>';
     }).join('');
     el.innerHTML = '<h4>직접 판단이 필요한 자료 <small>(' + items.length + '묶음 — 달·사업을 고르면 위의 표에 더해집니다. 고르지 않으면 넣지 않습니다)</small></h4>' +
@@ -3576,7 +3594,7 @@ var api = {
     var V = VCH;
     if (V.file) { var rows = V.file.rows.filter(function (r) { return r.ym === V.ym && !(V.exclUn && /미/.test(r.approved || '')); }); V.groups = vGroups_(rows); vMatchGroups_(V.groups, V.projects, V.setup.mem); } else V.groups = null;
     if (V.edu) { V.eduGroups = eduGroups_(eduMonth_(V.edu.rows, V.ym)); vMatchGroups_(V.eduGroups, V.projects, V.setup.mem); } else V.eduGroups = null;
-    vchOthMonths(); vchUnBuild(); V.moCache = {}; V.moVal = {};
+    vchOthMonths(); vchUnBuild(); V.moCache = {}; V.moVal = {}; V.vIdx = null;
     renderVoucher(); vchAi();
   }
 
@@ -5174,7 +5192,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.18", last = 0, shown = false;
+  var APP_VER = "2026-10-12.19", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
