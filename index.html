@@ -1743,6 +1743,8 @@ function projectRowKinds_(p) {
  * 반환 { title, header:[], rows:[{kind, section, cells:[], notes:[], pid, owner}] }
  * cells: [교육구분, 세부구분, 교육사업명, 담당자, 계획, 진행, 진행률, 구분, 월×12]
  */
+/** 실적표 「구분」 칸에 보이는 글자: 줄 종류 + 단위 (차수는 차수, 인원은 명, 건수는 건, 비용은 천원) */
+function kindLabel_(k, unit) { return k === '인원' ? '인원(명)' : k === '건수' ? '건수(건)' : k === '비용' ? '비용(천원)' : k === '지표값' ? (unit ? '지표값(' + unit + ')' : '지표값') : k; }
 function buildReportGrid_(projects, entries, config, viewer, systemsRows, curOverride) {
   var months = fiscalMonths_(config['회계연도시작']);
   var catRank = {}, subRank = {};
@@ -1784,7 +1786,7 @@ function buildReportGrid_(projects, entries, config, viewer, systemsRows, curOve
       }
       var r = kind === '지표값' ? '' : (plan === '상시' ? '-' : rate_(done, plan));
       rows.push({ kind: kind, section: 'project', band: pi % 2, pid: p['사업ID'], owner: p['담당자'], unit: p['지표단위'], marks: monthMarks_(a, months, curYm, viewer === undefined || p['담당자'] === viewer),
-        cells: [p['교육구분'], p['세부구분'], p['사업명'], p['담당자'], plan, done, r, kind].concat(monthly), notes: notes });
+        cells: [p['교육구분'], p['세부구분'], p['사업명'], p['담당자'], plan, done, r, kindLabel_(kind, p['지표단위'])].concat(monthly), notes: notes });
     });
     // 월별 진행상황(텍스트)이 하나라도 있는 사업에는 '진행상황' 줄을 붙인다
     if (hasText) rows.push({ kind: '진행상황', section: 'project', band: pi % 2, pid: p['사업ID'], owner: p['담당자'], unit: '', marks: monthMarks_(a, months, curYm, viewer === undefined || p['담당자'] === viewer),
@@ -1796,7 +1798,7 @@ function buildReportGrid_(projects, entries, config, viewer, systemsRows, curOve
   function totalRows(label, t, section) {
     ['차수', '건수', '인원', '비용'].filter(function (k) { return k !== '건수' || t.has.건수; }).forEach(function (k) {
       rows.push({ kind: k, section: section, owner: label,
-        cells: ['', '', section === 'total' ? '총계' : '담당자별 소계', label, k === '건수' && !t.계획[k] ? '상시' : t.계획[k], t.진행[k], k === '건수' && !t.계획[k] ? '-' : rate_(t.진행[k], t.계획[k]), k]
+        cells: ['', '', section === 'total' ? '총계' : '담당자별 소계', label, k === '건수' && !t.계획[k] ? '상시' : t.계획[k], t.진행[k], k === '건수' && !t.계획[k] ? '-' : rate_(t.진행[k], t.계획[k]), kindLabel_(k)]
           .concat(t.월[k].map(function (v) { return v || ''; })), notes: months.map(function () { return ''; }) });
     });
   }
@@ -4906,7 +4908,7 @@ var api = {
     }
     // ── 시트 한 장: 화면(renderReport)과 같은 규칙. suffix 가 있으면 제목에 「· 3월 기준」처럼 덧붙인다
     function makeSheet(r, rows, owner, suffix) {
-    var widths = [], minW = [10, 14, 20, 7, 7, 7, 8, 7], maxW = [18, 26, 44, 10, 12, 12, 8, 8];
+    var widths = [], minW = [10, 14, 20, 7, 7, 7, 8, 7], maxW = [18, 26, 44, 10, 12, 12, 8, 13];
     for (var wi = 0; wi < NCOL; wi++) widths.push(wi < 8 ? minW[wi] : 8);
     var body = [], prevPid = null, nowTxt = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16), merges = [], SP = repSpans(rows), curO = [];
     rows.forEach(function (x, ri) {
@@ -5196,7 +5198,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.3", last = 0, shown = false;
+  var APP_VER = "2026-10-14.4", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
