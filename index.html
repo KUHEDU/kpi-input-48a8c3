@@ -1771,7 +1771,7 @@ function buildReportGrid_(projects, entries, config, viewer, systemsRows, curOve
           var st = a.상태[i];
           if (st && st !== '진행' && st !== '예정') return st;
           if (a.예정차수[i]) return '';                       // 예정월은 색으로만 표시 — 「(예정 N)」 글자는 쓰지 않는다
-          return a.계획월별[i] ? '계획 ' + a.계획월별[i] : '';
+          return '';                                          // 「계획 N」 글자는 쓰지 않는다
         });
         notes = hasText ? notes : a.비고.slice();
       } else if (kind === '인원') {
@@ -5196,7 +5196,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.2", last = 0, shown = false;
+  var APP_VER = "2026-10-14.3", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
