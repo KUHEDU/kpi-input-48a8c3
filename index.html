@@ -5006,7 +5006,7 @@ var api = {
       rows.forEach(function (x, ri) {
         if (x.section === 'approve') return;
         if (x.kind === '진행상황') x.cells.forEach(function (c, i) { if (i >= 8 && typeof c === 'string' && c) need[ri] = Math.max(need[ri], lines(c, 13)); });
-        [[0, 8], [1, 10], [2, 24]].forEach(function (ci) {
+        [[0, 8], [1, 10], [2, 40]].forEach(function (ci) {
           var n = SP[ri][ci[0]]; if (!(n > 0) || x.section !== 'project') return;
           var L = lines(x.cells[ci[0]], ci[1]); if (L > n) for (var k = 0; k < n; k++) need[ri + k] = Math.max(need[ri + k], Math.ceil(L / n));
         });
@@ -5028,7 +5028,7 @@ var api = {
     });
     var last = rIdx - 1, lastCol = colName(NCOL - 1);
     // 열 너비 고정: 앞 8칸(교육구분·세부구분·사업명·담당자·계획·진행·진행률·구분)은 좁게, 월별 12칸은 12.43(엑셀 화면 기준) — 합쳐서 1920px 화면 한 폭에 들어간다
-    widths = [9.14, 11.14, 28.14, 7.14, 9.14, 9.14, 7.14, 11.14]; for (var wk = 8; wk < NCOL; wk++) widths.push(13.14);       // 파일에 적는 값 = 엑셀 화면의 열 너비 + 0.71
+    widths = [9.14, 11.14, 45.42, 7.14, 9.14, 9.14, 7.14, 11.14]; for (var wk = 8; wk < NCOL; wk++) widths.push(13.14);       // 파일에 적는 값 = 엑셀 화면의 열 너비 + 0.71
     var colsXml = '<cols>' + widths.map(function (w, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + (Math.round(w * 10) / 10) + '" customWidth="1"/>'; }).join('') + '</cols>';
     var sheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
       '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:' + lastCol + last + '"/>' +
@@ -5279,7 +5279,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.10", last = 0, shown = false;
+  var APP_VER = "2026-10-14.11", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
