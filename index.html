@@ -370,6 +370,8 @@ table.report.tight td.txt .tx { font-size: 9.5px; }
 .stamp b { font-size: 11px; letter-spacing: -.2px; } .stamp i { font-style: normal; font-size: 9px; font-weight: 700; }
 .stamp.big { padding: 6px 18px 7px; border-width: 3px; border-radius: 10px; } .stamp.big b { font-size: 26px; } .stamp.big i { font-size: 13px; }
 table.report tbody tr.approve td, table.report tbody tr.approve td.fz { background: #fff5f2; }
+.seal { width: 46px; height: 46px; display: inline-block; vertical-align: middle; mix-blend-mode: multiply; filter: drop-shadow(0 0 .4px rgba(160, 45, 32, .45)); } .seal.big { width: 112px; height: 112px; }
+table.report tbody tr.approve td.ap { height: 56px; }
 table.report td.ap-lb { text-align: left; font-weight: 800; color: #a02d20; border-right: 2px solid var(--line-strong); }
 table.report td.ap-lb small { font-weight: 500; color: var(--ink-3); }
 table.report td.ap { text-align: center; vertical-align: middle; padding: 3px 2px; }
@@ -3751,10 +3753,44 @@ var api = {
     AUTH.afterLogin = function () { showTab('report'); };
     showLogin(); $('#lgName').value = '팀장'; syncLogin();
   }
+  // 팀장 승인 도장(SVG): 이중 원 + 「팀장 / 승인 / 월.일」, 달마다 조금씩 다르게 기울고 가장자리가 번져 인주로 찍은 느낌. 화면과 엑셀 그림(PNG)이 같은 모양을 쓴다
+  var SEAL_N = 0;
+  function stampKey_(a) { return String(a.ym || '') + '|' + String(a.at || '') + '|' + (a.changed ? 1 : 0); }
+  function stampSvg_(at, changed, ym, mode) {
+    var col = changed ? '#b7791f' : '#c0392b', md = String(at || '').slice(5, 10).replace('-', '.'), h = 0, sx = String(ym || at || ''), uid = 'sl' + (++SEAL_N);
+    for (var i = 0; i < sx.length; i++) h = (h * 31 + sx.charCodeAt(i)) % 997;
+    var ang = [-8, 5, -4, 7, -6, 3, -9, 6, -3, 8, -5, 4][h % 12], seed = h % 50 + 1, ff = "'Batang','바탕','Noto Serif KR','Malgun Gothic',serif";
+    return '<svg class="seal' + (mode === 'big' ? ' big' : '') + '" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="팀장 승인 ' + md + '">' +
+      '<defs><filter id="' + uid + 'f" x="-6%" y="-6%" width="112%" height="112%"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="' + seed + '" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.6"/></filter><clipPath id="' + uid + 'c"><circle cx="50" cy="50" r="38"/></clipPath></defs>' +
+      '<g transform="rotate(' + ang + ' 50 50)" filter="url(#' + uid + 'f)" fill="none" stroke="' + col + '">' +
+      '<circle cx="50" cy="50" r="45.5" stroke-width="4.2"' + (changed ? ' stroke-dasharray="14 5"' : '') + '/><circle cx="50" cy="50" r="39" stroke-width="1.5"/>' +
+      '<g clip-path="url(#' + uid + 'c)"><line x1="0" y1="37" x2="100" y2="37" stroke-width="1.5"/><line x1="0" y1="66" x2="100" y2="66" stroke-width="1.5"/></g>' +
+      '<g fill="' + col + '" stroke="' + col + '" stroke-width=".8" stroke-linejoin="round" font-family="' + ff + '" text-anchor="middle" font-weight="900"><text x="50" y="31" font-size="11.5">팀장</text><text x="50" y="59.5" font-size="27">승인' + (changed ? '*' : '') + '</text><text x="50" y="81" font-size="14.5">' + md + '</text></g></g></svg>';
+  }
+  // 엑셀에 박을 도장 그림: 같은 SVG 를 캔버스에 그려 PNG 로 만든다 → { 키: Uint8Array }
+  function stampPngs_(lists) {
+    var items = {};
+    lists.forEach(function (rs) { (rs || []).forEach(function (x) { if (x.section === 'approve' && x.appr) x.appr.forEach(function (a) { if (a && a.at) items[stampKey_(a)] = a; }); }); });
+    var keys = Object.keys(items), out = {};
+    return Promise.all(keys.map(function (k) {
+      return new Promise(function (res) {
+        var a = items[k], img = new Image();
+        img.onload = function () {
+          try {
+            var c = document.createElement('canvas'); c.width = c.height = 260; var g = c.getContext('2d'); g.drawImage(img, 0, 0, 260, 260);
+            var b = atob(c.toDataURL('image/png').split(',')[1]), u = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); out[k] = u;
+          } catch (e) {}
+          res();
+        };
+        img.onerror = function () { res(); };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(stampSvg_(a.at, a.changed, a.ym, 'png'));
+      });
+    })).then(function () { return out; });
+  }
   function apCell(a, leader) {
     var attr = ' data-ym="' + esc(a.ym) + '"';
     if (a.at) return '<td class="ap' + (a.changed ? ' chg' : '') + (leader && a.can ? ' go' : '') + '"' + attr + ' title="' + esc('팀장 승인 ' + a.at.slice(0, 10) + (a.changed ? ' · 승인한 뒤에 이 달 입력이 다시 저장되었습니다' : '') + (leader ? ' · 눌러서 다시 승인·취소' : '')) + '">' +
-      '<span class="stamp"><b>승인' + (a.changed ? '*' : '') + '</b><i>' + esc(mdOf_(a.at)) + '</i></span></td>';
+      stampSvg_(a.at, a.changed, a.ym) + '</td>';
     if (!a.can) return '<td class="ap"></td>';
     return '<td class="ap' + (leader ? ' go' : '') + '"' + attr + (leader ? ' title="눌러서 ' + esc(ymFull(a.ym)) + ' 승인"' : '') + '>' + (leader ? '<span class="ap-btn">승인</span>' : '<span class="ap-wait">대기</span>') + '</td>';
   }
@@ -3764,7 +3800,7 @@ var api = {
       var ap = inf.approval, late = inf.owners.filter(function (o) { return !o.submitted; });
       $('#dlgTitle').textContent = ymFull(ym) + ' 팀장 승인'; $('#dlgErr').textContent = '';
       $('#dlgBody').innerHTML = '<div class="apr">' +
-        '<div class="apr-stamp">' + (ap ? '<span class="stamp big"><b>승인' + (ap.changed ? '*' : '') + '</b><i>' + esc(mdOf_(ap.at)) + '</i></span>' : '<span class="apr-none">아직 승인하지 않았습니다</span>') + '</div>' +
+        '<div class="apr-stamp">' + (ap ? stampSvg_(ap.at, ap.changed, ym, 'big') : '<span class="apr-none">아직 승인하지 않았습니다</span>') + '</div>' +
         (ap ? '<p class="apr-when">' + esc(ap.at.slice(0, 10)) + ' 승인' + (ap.changed ? ' · <b>승인한 뒤에 이 달 입력이 다시 저장되었습니다</b> (다시 승인하면 * 표시가 사라집니다)' : '') + '</p>' : '') +
         '<div class="apr-date"><label for="apDate">승인 날짜</label><input type="date" id="apDate" value="' + esc(inf.today) + '" min="' + esc(ym) + '-01" max="' + esc(inf.today) + '"><small>기본값은 오늘입니다. 실제로 승인한 날이 다르면 바꾸세요.' +
           (inf.lastEdit ? ' (이 달 마지막 입력 저장: ' + esc(mdOf_(inf.lastEdit) + (String(inf.lastEdit).length > 10 ? ' ' + String(inf.lastEdit).slice(11, 16) : '')) + ' — 이보다 앞선 날짜로 승인하면 * 표시가 남습니다)' : '') + '</small></div>' +
@@ -4882,7 +4918,7 @@ var api = {
   }
 
   // ═════════ 실적표 → 엑셀(.xlsx): 화면에 보이는 그대로(필터·색·고정 열·〃 표시)를 직접 만든다. 외부 라이브러리 없음.
-  function buildXlsx(r, rows, owner, extra) {
+  function buildXlsx(r, rows, owner, extra, pngs) {
     var enc = new TextEncoder(), FONT = '맑은 고딕', NCOL = r.header.length;
     var C = { brand: 'FF1F3B63', ink: 'FF16202E', ink2: 'FF4A5568', dim: 'FF7A8699', band: 'FFF7F9FC', owner: 'FFE6EDF7', total: 'FFFDEEB8', plan: 'FFE2EFDA', miss: 'FFFFCCCC', extra: 'FFFFF2CC' };
     function xesc(t) { return String(t).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -4910,6 +4946,7 @@ var api = {
     }
     // ── 시트 한 장: 화면(renderReport)과 같은 규칙. suffix 가 있으면 제목에 「· 3월 기준」처럼 덧붙인다
     function makeSheet(r, rows, owner, suffix) {
+      var stamps = [];                                                    // 이 시트에 박을 승인 도장 [{col, row, key}]
     var widths = [], minW = [10, 14, 20, 7, 7, 7, 8, 7], maxW = [18, 26, 44, 10, 12, 12, 8, 13];
     for (var wi = 0; wi < NCOL; wi++) widths.push(wi < 8 ? minW[wi] : 8);
     var body = [], prevPid = null, nowTxt = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 16), merges = [], SP = repSpans(rows), curO = [];
@@ -4924,7 +4961,9 @@ var api = {
           if (i === 0) { merges.push('A' + (4 + ri) + ':H' + (4 + ri)); cells.push({ v: '팀장 승인', o: ap0, txt: '' }); return; }
           if (i < 8) { cells.push({ v: null, o: ap0, txt: '' }); return; }
           var ai = x.appr ? x.appr[i - 8] : null, on = !!(ai && ai.at);
-          cells.push({ v: c, o: { fill: on ? (ai.changed ? C.extra : 'FFFBE3E0') : 'FFFFF3F0', b: on, color: on ? (ai.changed ? 'FF8A6100' : 'FFC0392B') : C.dim, h: 'center', v: 'center', wrap: true, sz: 9 }, txt: '' }); return;
+          var stk = on ? stampKey_(ai) : '', img = !!(on && pngs && pngs[stk]);       // 도장 그림이 있으면 글자 대신 그림(칸은 비워 둔다)
+          if (img) stamps.push({ col: i, row: 4 + ri, key: stk });
+          cells.push({ v: img ? '' : c, o: { fill: on ? (ai.changed ? C.extra : 'FFFBE3E0') : 'FFFFF3F0', b: on, color: on ? (ai.changed ? 'FF8A6100' : 'FFC0392B') : C.dim, h: 'center', v: 'center', wrap: true, sz: 9 }, txt: '' }); return;
         }
         var o = { fill: rowFill, b: bold, top: startP, h: 'left' }, v = c, shown;
         if (i < 4) {                                // 같은 항목이 이어지면 병합(위 칸에 합쳐진 칸은 같은 서식의 빈 칸)
@@ -4957,7 +4996,7 @@ var api = {
         if (!(isTxt && i >= 8)) widths[i] = Math.max(widths[i], i < 8 ? Math.min(len, maxW[i]) : Math.min(len, 11));
         cells.push({ v: v, o: o, txt: isTxt && i >= 8 ? String(v || '') : '' });
       });
-      body.push({ cells: cells, ht: sec === 'approve' ? 27 : ht });
+      body.push({ cells: cells, ht: sec === 'approve' ? 40 : ht });
     });
     // ── 시트 XML
     var sd = [], rIdx = 1;
@@ -4981,25 +5020,46 @@ var api = {
       '<sheetFormatPr defaultRowHeight="15"/>' + colsXml + '<sheetData>' + sd.join('') + '</sheetData>' +
       '<mergeCells count="' + merges.length + '">' + merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join('') + '</mergeCells>' +
       '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>' +
-      '<headerFooter><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter></worksheet>';
-      return sheet;
+      '<headerFooter><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter>' + (stamps.length ? '<drawing r:id="rId1"/>' : '') + '</worksheet>';
+      return { xml: sheet, stamps: stamps, widths: widths };
     }
-    var sheet = makeSheet(r, rows, owner, '');
-    var MS = (extra || []).map(function (x) { return { name: String(x.label + ' 기준').replace(/[\\\/?*\[\]:]/g, ' '), xml: makeSheet(x.r, x.rows, owner, x.label + ' 기준') }; });
+    var sheetO = makeSheet(r, rows, owner, ''), sheet = sheetO.xml;
+    var MS = (extra || []).map(function (x) { return { name: String(x.label + ' 기준').replace(/[\\\/?*\[\]:]/g, ' '), o: makeSheet(x.r, x.rows, owner, x.label + ' 기준') }; });
+    MS.forEach(function (m) { m.xml = m.o.xml; });
     var styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       (nfs.length ? '<numFmts count="' + nfs.length + '">' + nfs.map(function (c, i) { return '<numFmt numFmtId="' + (164 + i) + '" formatCode="' + xesc(c) + '"/>'; }).join('') + '</numFmts>' : '') +
       '<fonts count="' + fonts.length + '">' + fonts.join('') + '</fonts><fills count="' + fills.length + '">' + fills.join('') + '</fills><borders count="' + borders.length + '">' + borders.join('') + '</borders>' +
       '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="' + xfs.length + '">' + xfs.join('') + '</cellXfs>' +
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
     var H = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    // ── 승인 도장 그림 묶음: 시트마다 drawing 한 벌 + 도장 PNG (같은 도장은 한 번만 담는다)
+    var SHEETS = [{ stamps: sheetO.stamps, widths: sheetO.widths }].concat(MS.map(function (m) { return { stamps: m.o.stamps, widths: m.o.widths }; }));
+    var extraFiles = [], ctOver = '', dn = 0, mediaIdx = {}, mediaFiles = [], EMU = 9525, SZ = 46, ROWPX = 53;
+    function mediaOf(key) { if (mediaIdx[key] === undefined) { mediaIdx[key] = mediaFiles.length + 1; mediaFiles.push({ name: 'xl/media/stamp' + mediaIdx[key] + '.png', bin: pngs[key] }); } return mediaIdx[key]; }
+    SHEETS.forEach(function (sh, si) {
+      if (!sh.stamps.length) return;
+      dn++; var anchors = [], rels = [];
+      sh.stamps.forEach(function (x, k) {
+        var cw = Math.round((sh.widths[x.col] || 8) * 7 + 5), co = Math.max(0, Math.round((cw - SZ) / 2)), ro = Math.max(0, Math.round((ROWPX - SZ) / 2)), rid = 'rId' + (k + 1);
+        rels.push('<Relationship Id="' + rid + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/stamp' + mediaOf(x.key) + '.png"/>');
+        anchors.push('<xdr:oneCellAnchor><xdr:from><xdr:col>' + x.col + '</xdr:col><xdr:colOff>' + (co * EMU) + '</xdr:colOff><xdr:row>' + (x.row - 1) + '</xdr:row><xdr:rowOff>' + (ro * EMU) + '</xdr:rowOff></xdr:from><xdr:ext cx="' + (SZ * EMU) + '" cy="' + (SZ * EMU) + '"/>' +
+          '<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="' + (k + 2) + '" name="팀장 승인 도장 ' + (k + 1) + '" descr="팀장 승인 도장"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="' + rid + '"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>' +
+          '<xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + (SZ * EMU) + '" cy="' + (SZ * EMU) + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor>');
+      });
+      extraFiles.push({ name: 'xl/drawings/drawing' + dn + '.xml', xml: H + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' + anchors.join('') + '</xdr:wsDr>' });
+      extraFiles.push({ name: 'xl/drawings/_rels/drawing' + dn + '.xml.rels', xml: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + rels.join('') + '</Relationships>' });
+      extraFiles.push({ name: 'xl/worksheets/_rels/sheet' + (si + 1) + '.xml.rels', xml: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing' + dn + '.xml"/></Relationships>' });
+      ctOver += '<Override PartName="/xl/drawings/drawing' + dn + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>';
+    });
+    extraFiles = extraFiles.concat(mediaFiles);
     var files = [
-      { name: '[Content_Types].xml', xml: H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' + MS.map(function (m, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 2) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+      { name: '[Content_Types].xml', xml: H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' + MS.map(function (m, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 2) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + ctOver + '</Types>' },
       { name: '_rels/.rels', xml: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
       { name: 'xl/workbook.xml', xml: H + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="28800" windowHeight="15000"/></bookViews><sheets><sheet name="실적표" sheetId="1" r:id="rId1"/>' + MS.map(function (m, i) { return '<sheet name="' + xesc(m.name) + '" sheetId="' + (i + 2) + '" r:id="rId' + (i + 2) + '"/>'; }).join('') + '</sheets><definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">&apos;실적표&apos;!$3:$3</definedName>' + MS.map(function (m, i) { return '<definedName name="_xlnm.Print_Titles" localSheetId="' + (i + 1) + '">&apos;' + xesc(m.name) + '&apos;!$3:$3</definedName>'; }).join('') + '</definedNames></workbook>' },
       { name: 'xl/_rels/workbook.xml.rels', xml: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' + MS.map(function (m, i) { return '<Relationship Id="rId' + (i + 2) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 2) + '.xml"/>'; }).join('') + '<Relationship Id="rId' + (MS.length + 2) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
       { name: 'xl/styles.xml', xml: styles },
       { name: 'xl/worksheets/sheet1.xml', xml: sheet }
-    ].concat(MS.map(function (m, i) { return { name: 'xl/worksheets/sheet' + (i + 2) + '.xml', xml: m.xml }; }));
+    ].concat(MS.map(function (m, i) { return { name: 'xl/worksheets/sheet' + (i + 2) + '.xml', xml: m.xml }; })).concat(extraFiles);
     return zipStore(files, enc);
   }
   var CRC_T = null;
@@ -5012,7 +5072,7 @@ var api = {
     var d = new Date(), dt = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(), tm = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
     var parts = [], cen = [], off = 0;
     files.forEach(function (f) {
-      var nm = enc.encode(f.name), data = enc.encode(f.xml), crc = crc32(data);
+      var nm = enc.encode(f.name), data = f.bin || enc.encode(f.xml), crc = crc32(data);
       var lh = new DataView(new ArrayBuffer(30)); lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true); lh.setUint16(10, tm, true); lh.setUint16(12, dt, true);
       lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true); lh.setUint16(26, nm.length, true); lh.setUint16(28, 0, true);
       parts.push(new Uint8Array(lh.buffer), nm, data);
@@ -5036,8 +5096,11 @@ var api = {
     });
   }
   function exportXlsx2(r, rows, owner, extra) {
+    stampPngs_([r.rows].concat((extra || []).map(function (x) { return x.r.rows; }))).then(function (pngs) { exportXlsx3(r, rows, owner, extra, pngs); }, function () { exportXlsx3(r, rows, owner, extra, {}); });
+  }
+  function exportXlsx3(r, rows, owner, extra, pngs) {
     var bytes;
-    try { bytes = buildXlsx(r, rows, owner, extra); } catch (e) { toast('엑셀 파일을 만들지 못했습니다: ' + e.message, true); return; }
+    try { bytes = buildXlsx(r, rows, owner, extra, pngs); } catch (e) { toast('엑셀 파일을 만들지 못했습니다: ' + e.message, true); return; }
     var stamp = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 10).replace(/-/g, '');
     var name = String(r.title || '교육팀 운영 실적').replace(/[\\\/:*?"<>|]/g, ' ').trim() + (owner ? '_' + owner : '') + '_' + stamp + '.xlsx';
     window.claude.use('downloads').then(function (dl) {
@@ -5200,7 +5263,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.5", last = 0, shown = false;
+  var APP_VER = "2026-10-14.6", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
