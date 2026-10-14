@@ -370,8 +370,8 @@ table.report.tight td.txt .tx { font-size: 9.5px; }
 .stamp b { font-size: 11px; letter-spacing: -.2px; } .stamp i { font-style: normal; font-size: 9px; font-weight: 700; }
 .stamp.big { padding: 6px 18px 7px; border-width: 3px; border-radius: 10px; } .stamp.big b { font-size: 26px; } .stamp.big i { font-size: 13px; }
 table.report tbody tr.approve td, table.report tbody tr.approve td.fz { background: #fff5f2; }
-.seal { width: 46px; height: 46px; display: inline-block; vertical-align: middle; mix-blend-mode: multiply; filter: drop-shadow(0 0 .4px rgba(160, 45, 32, .45)); } .seal.big { width: 112px; height: 112px; }
-table.report tbody tr.approve td.ap { height: 56px; }
+.seal { width: 56px; height: 56px; display: inline-block; vertical-align: middle; mix-blend-mode: multiply; filter: drop-shadow(0 0 .4px rgba(160, 45, 32, .45)); } .seal.big { width: 112px; height: 112px; }
+table.report tbody tr.approve td.ap { height: 66px; }
 table.report td.ap-lb { text-align: left; font-weight: 800; color: #a02d20; border-right: 2px solid var(--line-strong); }
 table.report td.ap-lb small { font-weight: 500; color: var(--ink-3); }
 table.report td.ap { text-align: center; vertical-align: middle; padding: 3px 2px; }
@@ -3759,13 +3759,13 @@ var api = {
   function stampSvg_(at, changed, ym, mode) {
     var col = '#c0392b', md = String(at || '').slice(5, 10).replace('-', '.'), h = 0, sx = String(ym || at || ''), uid = 'sl' + (++SEAL_N);
     for (var i = 0; i < sx.length; i++) h = (h * 31 + sx.charCodeAt(i)) % 997;
-    var ang = [-8, 5, -4, 7, -6, 3, -9, 6, -3, 8, -5, 4][h % 12], seed = h % 50 + 1, ff = "'Batang','바탕','Noto Serif KR','Malgun Gothic',serif";
+    var ang = [-8, 5, -4, 7, -6, 3, -9, 6, -3, 8, -5, 4][h % 12], seed = h % 50 + 1, ff = "'Batang','바탕','Noto Serif KR','Malgun Gothic',serif", fg = "'Malgun Gothic','맑은 고딕','Noto Sans KR','Apple SD Gothic Neo',sans-serif";
     return '<svg class="seal' + (mode === 'big' ? ' big' : '') + '" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="팀장 승인 ' + md + '">' +
       '<defs><filter id="' + uid + 'f" x="-6%" y="-6%" width="112%" height="112%"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="' + seed + '" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.6"/></filter><clipPath id="' + uid + 'c"><circle cx="50" cy="50" r="38"/></clipPath></defs>' +
       '<g transform="rotate(' + ang + ' 50 50)" filter="url(#' + uid + 'f)" fill="none" stroke="' + col + '">' +
       '<circle cx="50" cy="50" r="45.5" stroke-width="4.2"' + '' + '/><circle cx="50" cy="50" r="39" stroke-width="1.5"/>' +
       '<g clip-path="url(#' + uid + 'c)"><line x1="0" y1="37" x2="100" y2="37" stroke-width="1.5"/><line x1="0" y1="66" x2="100" y2="66" stroke-width="1.5"/></g>' +
-      '<g fill="' + col + '" stroke="' + col + '" stroke-width=".8" stroke-linejoin="round" font-family="' + ff + '" text-anchor="middle" font-weight="900"><text x="50" y="31" font-size="11.5">팀장</text><text x="50" y="59.5" font-size="27">승인' + (changed ? '*' : '') + '</text><text x="50" y="81" font-size="14.5">' + md + '</text></g></g></svg>';
+      '<g fill="' + col + '" stroke="' + col + '" stroke-width=".6" stroke-linejoin="round" text-anchor="middle"><text x="50" y="30" font-size="12" font-weight="900" font-family="' + ff + '">팀장</text><text x="50" y="60" font-size="24" font-weight="800" font-family="' + fg + '" letter-spacing="-.5">' + md + '</text><text x="50" y="83" font-size="16.5" font-weight="900" font-family="' + ff + '">승인</text></g></g></svg>';
   }
   // 엑셀에 박을 도장 그림: 같은 SVG 를 캔버스에 그려 PNG 로 만든다 → { 키: Uint8Array }
   function stampPngs_(lists) {
@@ -4996,7 +4996,7 @@ var api = {
         if (!(isTxt && i >= 8)) widths[i] = Math.max(widths[i], i < 8 ? Math.min(len, maxW[i]) : Math.min(len, 11));
         cells.push({ v: v, o: o, txt: isTxt && i >= 8 ? String(v || '') : '' });
       });
-      body.push({ cells: cells, ht: sec === 'approve' ? 40 : ht });
+      body.push({ cells: cells, ht: sec === 'approve' ? 44 : ht });
     });
     // ── 시트 XML
     var sd = [], rIdx = 1;
@@ -5034,7 +5034,7 @@ var api = {
     var H = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
     // ── 승인 도장 그림 묶음: 시트마다 drawing 한 벌 + 도장 PNG (같은 도장은 한 번만 담는다)
     var SHEETS = [{ stamps: sheetO.stamps, widths: sheetO.widths }].concat(MS.map(function (m) { return { stamps: m.o.stamps, widths: m.o.widths }; }));
-    var extraFiles = [], ctOver = '', dn = 0, mediaIdx = {}, mediaFiles = [], EMU = 9525, SZ = 46, ROWPX = 53;
+    var extraFiles = [], ctOver = '', dn = 0, mediaIdx = {}, mediaFiles = [], EMU = 9525, SZ = 54, ROWPX = 59;
     function mediaOf(key) { if (mediaIdx[key] === undefined) { mediaIdx[key] = mediaFiles.length + 1; mediaFiles.push({ name: 'xl/media/stamp' + mediaIdx[key] + '.png', bin: pngs[key] }); } return mediaIdx[key]; }
     SHEETS.forEach(function (sh, si) {
       if (!sh.stamps.length) return;
@@ -5263,7 +5263,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.7", last = 0, shown = false;
+  var APP_VER = "2026-10-14.8", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
