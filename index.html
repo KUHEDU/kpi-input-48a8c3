@@ -402,6 +402,10 @@ td.ap.go:hover .ap-btn { border-color: #c0392b; color: #c0392b; }
 .vs { display: inline-flex; align-items: center; gap: 6px; } .vs i { width: 10px; height: 10px; border-radius: 50%; }
 .vs.ok i { background: #3b9d54; } .vs.mid i { background: #e0a100; } .vs.bad i { background: #d64545; }
 .vh-aimsg { margin-left: auto; font-weight: 500; color: var(--ink-2); font-size: 12.5px; } .vh-aimsg a { margin-left: 8px; }
+.vh-mhint { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid #f0c36d; border-radius: 10px; background: #fff8e6; color: #6b4a00; font-size: 13px; line-height: 1.55; } .vh-mhint .btn { margin-left: 6px; }
+.vh-sumbox { margin: 10px 0 4px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font-size: 13px; } .vh-sumbox:empty { display: none; } .vh-sumbox .vs-h { display: block; margin-bottom: 4px; color: var(--brand, #1f3b63); } .vh-sumbox ul { margin: 0; padding-left: 18px; line-height: 1.6; }
+.vtot input.vov::placeholder { color: var(--ink-3); font-size: 11px; }
+.vh-un td.mo select { min-width: 96px; width: 110px; } .vh-un .vtbl select { min-width: 160px; }
 .vtbl-wrap { max-height: 44vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
 .vtbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .vtbl th { position: sticky; top: 0; z-index: 1; padding: 7px 8px; background: var(--surface-2); border-bottom: 1px solid var(--line); text-align: left; font-weight: 700; }
@@ -3158,7 +3162,7 @@ var api = {
   //  · 비용 = 전표 / 인원·차수 = 교육이수현황 (원외 직무·보수교육은 전표의 줄 수가 인원, 차수는 건드리지 않음)
   //  · 「상시」 사업은 차수를 매달 1로 고정하고 인원만 넣는다 / 세션형 교육은 강좌코드 수가 차수
   // 팀 전체 자료를 올려도 된다: 담당자를 골라 그 담당자의 사업에 넣는다. 내 사업은 화면 칸을 채운 뒤 [저장]으로, 다른 담당자 사업은 확인을 거쳐 바로 저장한다(그 담당자 화면에는 없으므로).
-  function openVoucher() {
+  function openVoucher(keep) {
     if (!confirmLeave()) return;
     var owners = (S.init.owners || []).slice();
     Promise.all([call('apiVoucherSetup'), call('apiListProjects')].concat(owners.map(function (o) { return call('apiGetMonth', o, S.ym).catch(function () { return null; }); }))).then(function (r) {
@@ -3169,6 +3173,11 @@ var api = {
       VCH.sel[S.owner] = true;                                          // 처음에는 내 것만 선택 — 다른 담당자는 직접 골라야 입력된다
       VCH.aiOn = !!vchKey() && !!vchCfg().consent;
       $('#dlgTitle').textContent = '📤 KIS 데이터 업로드 · ' + ymLabel(S.ym); $('#dlgErr').textContent = '';
+      if (keep && keep.__keep) {                                      // 「그 달 기준으로 다시 보기」: 같은 파일로 바로 확인 화면
+        VCH.file = keep.file; VCH.edu = keep.edu;
+        if (VCH.file) VCH.file.unapproved = VCH.file.rows.filter(function (r) { return r.ym === VCH.ym && /미/.test(r.approved || ''); }).length;
+        VCH.stage = 'review'; $('#dlg').classList.add('show'); $('#dlgSave').onclick = applyVoucher; vchBuild(); return;
+      }
       renderVoucher(); $('#dlg').classList.add('show');
       $('#dlgSave').onclick = applyVoucher;
     }).catch(function (e) { toast('전표 기능을 열지 못했습니다: ' + ((e && e.message) || e), true); });
@@ -3176,7 +3185,7 @@ var api = {
 
   function vchAiPanel() {
     var c = vchCfg(), sh = VCH.setup.shared || {}, has = !!(c.key || sh.key);
-    return '<details class="vh-set"' + (has ? '' : ' open') + '><summary>AI(Gemini) 설정 · ' + (has ? '키 등록됨 (' + (c.key ? '이 브라우저' : '팀 공유') + ')' : '키 없음 — 규칙 매칭만 씁니다') + '</summary><div class="vh-setbody">' +
+    return '<details class="vh-set"><summary>AI(Gemini) 설정 · ' + (has ? '키 등록됨 (' + (c.key ? '이 브라우저' : '팀 공유') + ')' : '키 없음 — 규칙 매칭만 씁니다') + '</summary><div class="vh-setbody">' +
       '<p>전표 문구와 사업명이 딱 맞지 않을 때 Google Gemini 가 판단을 거듭니다. <b>무료 API 키</b>가 필요합니다 — <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 만들 수 있습니다.</p>' +
       '<div class="vh-keyrow"><input type="password" id="vKey" autocomplete="off" placeholder="' + (has ? '(등록된 키가 있습니다 — 바꿀 때만 입력)' : 'API 키 붙여넣기') + '"><button type="button" class="btn sm" id="vKeyTest">연결 시험</button><button type="button" class="btn sm primary" id="vKeySave">저장</button></div>' +
       '<div class="vh-keyrow"><input type="text" id="vModel" autocomplete="off" value="' + esc(c.pin || '') + '" placeholder="모델 직접 지정(선택) — 비워 두면 자동으로 고릅니다. 예: gemini-2.5-flash"></div>' + '<label class="vh-chk"><input type="checkbox" id="vShare"' + (sh.key && !c.key ? ' checked' : '') + '> 팀원 모두 쓰도록 시트에 저장</label><div class="vh-msg" id="vKeyMsg"></div>' +
@@ -3194,13 +3203,13 @@ var api = {
     if (V.stage === 'pick') {
       var chips = vchFileChips();
       body.innerHTML = '<div class="vch">' +
-        '<div class="vh-drop" id="vDrop"><b>그 달의 전표·교육이수현황 엑셀</b>을 여기에 끌어다 놓거나 <button type="button" class="btn sm primary" id="vPick">파일 고르기</button>' +
-        '<small>두 파일을 함께(또는 하나만) 올릴 수 있고, 종류는 자동으로 알아봅니다. ERP 「교육팀 전표」(.xls · .xlsx · .csv)와 교육 시스템 「직원별 교육 이수 내역」(.xlsx). 파일은 이 브라우저 안에서만 읽고 어디에도 올리지 않으며, 사번·이름은 저장하지 않습니다.</small><input type="file" id="vFile" accept=".xls,.xlsx,.csv,.txt,.htm,.html" multiple hidden></div>' +
+        '<div class="vh-drop" id="vDrop"><div><b>KIS 전표·교육이수현황 엑셀</b>을 여기에 끌어다 놓거나</div><button type="button" class="btn sm primary" id="vPick">파일 고르기</button>' +
+        '<small>두 파일을 함께(또는 하나만) 올릴 수 있고, 종류는 자동으로 알아봅니다. KIS 「교육팀 전표」(.xls · .xlsx · .csv)와 교육 시스템 「직원별 교육 이수 내역」(.xlsx). 파일은 이 브라우저 안에서만 읽고 어디에도 올리지 않으며, 사번·이름은 저장하지 않습니다.</small><input type="file" id="vFile" accept=".xls,.xlsx,.csv,.txt,.htm,.html" multiple hidden></div>' +
         (chips ? '<div class="vh-files" id="vFiles">' + chips + '</div><div style="margin:10px 0"><button type="button" class="btn primary" id="vGo">' + (V.file && V.edu ? '두 파일로 확인 화면 열기' : '이 파일로 확인 화면 열기' + (V.file ? ' (교육이수현황도 올리면 인원·차수까지 채웁니다)' : ' (전표도 올리면 비용까지 채웁니다)')) + '</button></div>' : '') +
         '<ul class="vh-how"><li>그 달(' + esc(ymLabel(V.ym)) + ')의 <b>전표</b>에서는 비용을, <b>교육이수현황</b>에서는 인원·차수를 가져와 <b>사업별로 종합</b>합니다. 원외 직무·보수교육은 전표의 줄 수가 인원입니다(차수는 그대로).</li>' +
         '<li><b>「상시」로 체크된 사업</b>은 차수를 매달 1로 고정하고 인원만 채웁니다. 세션형 교육(CPR·KALS 등)은 강좌코드 하나가 1차수이며 시작일자 기준의 달에 들어갑니다.</li>' +
         '<li>같은 문구는 한 줄로 묶어 보여 드리고, 확신이 낮은 줄은 노란색·붉은색으로 표시합니다. <b>고쳐서</b> 쓸 수 있습니다. 팀 전체 자료를 올려도 되며, 다음 화면에서 <b>어느 담당자의 것을 입력할지 고릅니다</b>(처음에는 내 것만). 내 사업은 칸이 채워진 뒤 <b>[저장]</b>을 눌러야 반영되고, 선택한 다른 담당자 사업은 확인 후 바로 저장됩니다.</li></ul>' + vchAiPanel() + '</div>';
-      $('#dlgSave').textContent = '비용 칸에 채우기'; $('#dlgSave').disabled = true;
+      $('#dlgSave').textContent = '파일을 올리면 채울 수 있습니다'; $('#dlgSave').disabled = true;
       var pick = $('#vPick', body), file = $('#vFile', body), drop = $('#vDrop', body);
       pick.addEventListener('click', function () { file.click(); });
       file.addEventListener('change', function () { if (file.files.length) vchLoadFiles([].slice.call(file.files)); });
@@ -3220,7 +3229,7 @@ var api = {
       (info ? '<div class="vh-file"><b>전표</b> ' + esc(info.name) + ' · 비용 ' + n(info.total) + '줄' + (info.skipped ? ' (상대 분개 ' + n(info.skipped) + '줄 제외)' : '') + ' · <b>' + esc(ymLabel(V.ym)) + ' ' + n(rowsN) + '줄 ' + n(amt) + '원</b>' +
         (others.length ? ' <span class="muted">· 다른 달: ' + others.map(function (m) { return esc(m.slice(2)) + ' ' + info.byMonth[m] + '줄'; }).join(', ') + ' (비어 있는 칸은 아래에서 채움)</span>' : '') + '</div>' : '') +
       (V.edu ? '<div class="vh-file"><b>교육이수현황</b> ' + esc(V.edu.name) + ' · 이수 내역 ' + n(V.edu.total) + '줄' + (V.edu.umbrella ? ' (일괄 이수 기록 ' + n(V.edu.umbrella) + '줄 제외)' : '') + ' · <b>' + esc(ymLabel(V.ym)) + ' 교육 ' + n(eg.length) + '묶음 · 이수 ' + n(ep) + '명 · 세션 ' + n(es) + '개</b></div>' : '') +
-      '<div class="vh-file"><button type="button" class="btn sm" id="vAgain">파일 다시 고르기</button></div>' +
+      '<div class="vh-file"><button type="button" class="btn sm" id="vAgain">파일 다시 고르기</button></div>' + vchMonthHint() + '<div class="vh-sumbox" id="vSummary"></div>' +
       (info && info.unapproved ? '<label class="vh-chk"><input type="checkbox" id="vUn"' + (V.exclUn ? ' checked' : '') + '> 결재 미승인 전표 ' + n(info.unapproved) + '건 제외</label>' : '') +
       vchOwnPanel() +
       (info ? '<h4 class="vh-h">전표 → 비용 <small>(원외 직무·보수교육은 줄 수가 인원)</small></h4><div class="vh-sum" id="vSumV"><span class="vs ok"><i></i>자동 ' + n(cnt.auto) + '줄</span><span class="vs mid"><i></i>확인 필요 ' + n(cnt.check) + '줄</span><span class="vs bad"><i></i>못 찾음 ' + n(cnt.none) + '줄</span><span class="vh-aimsg" id="vAiMsg"></span></div>' +
@@ -3232,6 +3241,7 @@ var api = {
         '<label class="vh-chk" style="margin-left:auto"><input type="checkbox" id="vRem"' + (V.remember ? ' checked' : '') + '> 이번 매칭을 기억해 다음 달부터 자동으로 쓰기 (노란색 줄은 맞게 확인했을 때만)</label>' + (V.setup.mem.length ? '<a href="#" id="vForget">기억 ' + V.setup.mem.length + '건 지우기</a>' : '') + '</div>' +
       vchAiPanel() + '</div>';
     $('#dlgSave').textContent = '채우기';
+    var mh = $('#vMonthGo', body); if (mh) mh.addEventListener('click', function () { vchSwitchMonth(mh.dataset.ym); });
     $('#vAgain', body).addEventListener('click', function () { V.stage = 'pick'; V.groups = null; V.eduGroups = null; renderVoucher(); });
     var un = $('#vUn', body); if (un) un.addEventListener('change', function () { V.exclUn = un.checked; vchBuild(); });
     $$('input[name="vMode"]', body).forEach(function (r) { r.addEventListener('change', function () { V.mode = r.value; vchTotals(); }); });
@@ -3400,7 +3410,7 @@ var api = {
       var cells = ['cnt', 'ppl', 'cost'].map(function (f) {
         var cur = vchCur(p, f), nv = vchFinal(q, f, cur), can = f === 'cost' ? false : (f === 'cnt' ? p.cnt : p.ppl);
         if (nv === undefined && !can) return '<td class="r num">—</td>';
-        var val = f === 'cost' ? '<b>' + (nv === undefined ? '—' : n(nv)) + '</b>' : '<input class="vov" data-id="' + esc(id) + '" data-f="' + f + '" inputmode="numeric" value="' + (nv === undefined ? '' : nv) + '" aria-label="' + esc(p.name + ' ' + VF[f][0]) + '">';
+        var val = f === 'cost' ? '<b>' + (nv === undefined ? '—' : n(nv)) + '</b>' : '<input class="vov" data-id="' + esc(id) + '" data-f="' + f + '" inputmode="numeric" value="' + (nv === undefined ? '' : nv) + '"' + (nv === undefined ? ' placeholder="그대로" title="비워 두면 지금 값이 그대로 남습니다"' : '') + ' aria-label="' + esc(p.name + ' ' + VF[f][0]) + '">';
         return '<td class="r num"><span class="vcur">' + (cur ? n(cur) : '—') + ' →</span> ' + val + (q.src[f] ? '<small class="vsrc">' + esc(q.src[f]) + '</small>' : '') + '</td>';
       }).join('');
       return '<tr><td>' + esc(p.owner) + (p.mine ? ' (나)' : '') + '</td><td>' + esc(p.name) + '</td>' + cells + '<td>' + (p.mine ? '<span class="vb rule">칸만 채움 · 저장 필요</span>' : '<span class="vb user">바로 저장</span>') + '</td></tr>';
@@ -3415,6 +3425,7 @@ var api = {
     $('#dlgSave').disabled = !ids.length;
     $('#dlgSave').textContent = others ? '채우기 (다른 담당자 ' + others + '건은 바로 저장)' : '채우기';
     vchOwnUpdate(); vchOthers(); if (V.unSkip) V.unSkip = false; else vchUnList();
+    vchSummary();
   }
 
   // ── 다른 달: 올린 파일에 다른 달 자료가 있으면, 그 달 실적 칸이 비어 있을 때만 채운다 (이미 입력된 칸은 건드리지 않는다)
@@ -3497,12 +3508,58 @@ var api = {
       '<div class="muted small">' + (kept ? '이미 입력된 ' + kept + '칸은 건드리지 않습니다. ' : '') + (skipN ? '확인이 필요한 ' + skipN + '묶음은 아래 「직접 판단이 필요한 자료」에서 사업을 고르면 채웁니다. ' : '') + '채운 칸은 [채우기]를 누르면 바로 시트에 저장됩니다(담당자 선택 기준).</div>';
     bind(); vchOthButton();
   }
+  // ── 올린 파일의 주된 달: 회계연도·이번 달까지 중 전표 줄 + 이수 인원이 가장 많은 달
+  //  ① 파일 이름의 「N월」(예: 9월 교육결과, 7-9월 전표 → 9월)  ② 없으면 전표가 있는 가장 최근 달  ③ 그것도 없으면 세션형 교육이 있는 가장 최근 달
+  //  (이수현황은 상시 과정 이수일이 몇 달에 몰려 있어 인원 수로 고르면 엉뚱한 달이 나온다)
+  function vchMainMonth() {
+    var V = VCH, cur = S.init.currentYm, ms = (S.init.months || []).filter(function (m) { return m <= cur; }), sc = {}, best = '';
+    ms.forEach(function (m) {
+      var v = V.file ? V.file.rows.filter(function (r) { return r.ym === m; }).length : 0, e = 0, ss = 0;
+      if (V.edu) eduMonth_(V.edu.rows, m).forEach(function (c) { e += c.rows.length; if (c.kind === 'session') ss++; });
+      sc[m] = { v: v, e: e, s: ss, t: v + e };
+    });
+    var byName = function (nm) { var all = String(nm || '').match(/(d{1,2})s*월/g); if (!all) return ''; var k = Number(all[all.length - 1].replace(/D/g, '')); return ms.filter(function (m) { return Number(m.slice(5)) === k; }).pop() || ''; };
+    best = byName(V.file && V.file.name) || byName(V.edu && V.edu.name);
+    if (!best && V.file) best = ms.filter(function (m) { return sc[m].v > 0; }).pop() || '';
+    if (!best && V.edu) best = ms.filter(function (m) { return sc[m].s > 0; }).pop() || '';
+    return { best: best, sc: sc };
+  }
+  function vchMonthHint() {
+    var V = VCH, mm = vchMainMonth(), b = mm.best; if (!b || b === V.ym) return '';
+    var bb = mm.sc[b]; if (!bb || !bb.t) return '';
+    return '<div class="vh-mhint">⚠ 올린 파일은 주로 <b>' + esc(ymLabel(b)) + '</b> 자료입니다' + (bb.v ? ' (전표 ' + n(bb.v) + '줄' : ' (') + (bb.v && bb.e ? ' · ' : '') + (bb.e ? '이수 ' + n(bb.e) + '명' : '') + '). 지금은 <b>' + esc(ymLabel(V.ym)) + '</b> 기준이라 ' + esc(ymLabel(b)) + ' 자료는 아래 「다른 달 — 비어 있는 칸 채우기」로만 들어갑니다.' +
+      ' <button type="button" class="btn sm primary" id="vMonthGo" data-ym="' + esc(b) + '">' + esc(ymLabel(b)) + ' 기준으로 다시 보기</button></div>';
+  }
+  function vchSwitchMonth(ym) {                                   // 같은 파일로 그 달 화면을 열고 확인 화면을 다시 띄운다
+    if (!confirmLeave()) return;
+    var keep = { file: VCH.file, edu: VCH.edu, __keep: true };
+    closeDlg(); S.ym = ym; $('#selYm').value = ym; S.dirty = {}; refresh();
+    var tries = 0;
+    (function waitMonth() {
+      if (S.month && S.month.ym === ym && $('#btnVoucher')) { openVoucher(keep); return; }
+      if (++tries > 80) { toast(ymLabel(ym) + ' 화면을 열지 못했습니다. 그 달을 고른 뒤 다시 올려 주세요.', true); return; }
+      setTimeout(waitMonth, 150);
+    })();
+  }
+  // ── 맨 위 요약: 무엇이 어디에 들어가는지
+  function vchSummary() {
+    var V = VCH, el = $('#vSummary'); if (!el) return;
+    var plan = vchCalc(), ids = Object.keys(plan).filter(function (id) { var q = plan[id]; return ['cnt', 'ppl', 'cost'].some(function (f) { return vchFinal(q, f, vchCur(q.p, f)) !== undefined; }); });
+    var mine = ids.filter(function (id) { return plan[id].p.mine; }).length, oth = ids.length - mine, k = V.fillOther ? (V.othFill || []).length : 0, u = (V.unRows || []).length;
+    var it = [];
+    it.push('<li><b>' + esc(ymLabel(V.ym)) + '</b> 내 사업 <b>' + mine + '개</b> — 화면 칸에 채운 뒤 <b>[저장]</b>을 눌러야 반영</li>');
+    if (oth) it.push('<li>다른 담당자 사업 <b>' + oth + '개</b> — [채우기] 때 바로 저장</li>');
+    if (k) it.push('<li>다른 달 비어 있는 칸 <b>' + k + '건</b> — [채우기] 때 바로 저장 (이미 입력된 칸은 그대로)</li>');
+    if (u) it.push('<li>직접 판단이 필요한 자료 <b>' + u + '묶음</b> — 맨 아래에서 달·사업을 고르기 전에는 넣지 않음</li>');
+    el.innerHTML = '<b class="vs-h">이렇게 채워집니다</b><ul>' + it.join('') + '</ul>';
+  }
   function vchOthButton() {                                         // 선택한 달에 채울 것이 없어도 다른 달에 채울 것이 있으면 [채우기]를 쓸 수 있게
     var V = VCH, plan = vchCalc(), ids = Object.keys(plan).filter(function (id) { var q = plan[id]; return ['cnt', 'ppl', 'cost'].some(function (f) { return vchFinal(q, f, vchCur(q.p, f)) !== undefined; }); });
     var k = V.fillOther ? (V.othFill || []).length : 0;
     $('#dlgSave').disabled = !ids.length && !k;
     var others = ids.filter(function (id) { return !plan[id].p.mine; }).length;
     $('#dlgSave').textContent = others || k ? '채우기 (' + (others ? '다른 담당자 ' + others + '건' : '') + (others && k ? ' · ' : '') + (k ? '다른 달 ' + k + '건' : '') + '은 바로 저장)' : '채우기';
+    vchSummary();
   }
 
   // ── 분류하지 못한 자료: 날짜가 없어 어느 달에도 못 넣은 줄, 다른 달에서 사업을 못 정한 묶음 → 사람이 직접 달·사업을 고른다
@@ -5279,7 +5336,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.11", last = 0, shown = false;
+  var APP_VER = "2026-10-15.1", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
