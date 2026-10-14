@@ -4875,7 +4875,7 @@ var api = {
   }
 
   // ═════════ 실적표 → 엑셀(.xlsx): 화면에 보이는 그대로(필터·색·고정 열·〃 표시)를 직접 만든다. 외부 라이브러리 없음.
-  function buildXlsx(r, rows, owner) {
+  function buildXlsx(r, rows, owner, infos) {
     var enc = new TextEncoder(), FONT = '맑은 고딕', NCOL = r.header.length;
     var C = { brand: 'FF1F3B63', ink: 'FF16202E', ink2: 'FF4A5568', dim: 'FF7A8699', band: 'FFF7F9FC', owner: 'FFE6EDF7', total: 'FFFDEEB8', plan: 'FFE2EFDA', miss: 'FFFFCCCC', extra: 'FFFFF2CC' };
     function xesc(t) { return String(t).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
@@ -4974,6 +4974,104 @@ var api = {
       '<mergeCells count="' + merges.length + '">' + merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join('') + '</mergeCells>' +
       '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>' +
       '<headerFooter><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter></worksheet>';
+    // ── 월별 마감 시트: 「실적표」 뒤에 달마다 한 장씩 (그 달 사업별 차수·인원·비용·진행상황, 누계, 담당자별 소계, 제출·승인 현황)
+    var MS = [], monthLabels = r.header.slice(8), MCOLS = ['교육구분', '세부구분', '교육사업명', '담당자', '월 상태', '차수·건수', '인원(명)', '비용(천원)', '지표값', '누계 차수', '누계 인원', '누계 비용(천원)', '연간 계획 차수', '연간 계획 인원', '연간 계획 예산(천원)', '진행상황 · 비고'];
+    var MW = [15, 21, 36, 9, 11, 9, 9, 12, 9, 9, 9, 13, 11, 11, 14, 42];
+    (function () {
+      var curYm = (S.init && S.init.currentYm) || '', ymList = (S.init && S.init.months) || [];
+      var P = [], byPid = {}, ownRows = [], totRows = [];
+      rows.forEach(function (x) {
+        if (x.section === 'project') {
+          var p = byPid[x.pid]; if (!p) { p = byPid[x.pid] = { pid: x.pid, c: x.cells.slice(0, 4), kinds: {}, marks: x.marks, notes: [], unit: x.unit }; P.push(p); }
+          p.kinds[x.kind] = x; if (x.unit) p.unit = x.unit;
+          (x.notes || []).forEach(function (t, i) { if (t && !p.notes[i]) p.notes[i] = t; });
+        } else if (x.section === 'owner') ownRows.push(x); else if (x.section === 'total') totRows.push(x);
+      });
+      function num(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
+      function won(v, kind) { return v === null ? null : kind === '비용' ? Math.round(v / 1000) : v; }
+      function cum(x, mi) { if (!x) return null; var t = 0, any = false; for (var k = 0; k <= mi; k++) { var v = num(x.cells[8 + k]); if (v !== null) { t += v; any = true; } } return any ? t : null; }
+      function planOf(x, kind) { if (!x) return ''; var v = x.cells[4]; return typeof v === 'number' ? won(v, kind) : (v || ''); }
+      var stl = { title: xf({ b: 1, sz: 14, color: C.brand, nb: 1 }), stamp: xf({ sz: 9, color: C.dim, h: 'right', nb: 1 }), note: xf({ sz: 9, color: C.ink2, nb: 1 }), noteB: xf({ sz: 10, b: 1, color: C.ink, nb: 1 }),
+        head: xf({ b: 1, color: 'FFFFFFFF', fill: C.brand, h: 'center', wrap: true }), sec: xf({ b: 1, sz: 11, color: C.brand, nb: 1 }) };
+      monthLabels.forEach(function (label, mi) {
+        var ym = ymList[mi] || '', future = ym && curYm && ym > curYm, info = infos && infos[mi], sd = [], merges = [], ri = 1;
+        var sname = (label + ' 마감').replace(/[\\\/?*\[\]:]/g, ' ');
+        // 제목·안내·제출현황
+        var title = (r.title || '교육팀 운영 실적') + ' · ' + label + ' 마감' + (owner ? ' · 담당자 ' + owner : '');
+        sd.push('<row r="1" ht="26" customHeight="1">' + cellXml(1, 0, title, stl.title) + cellXml(1, 11, '출력 ' + nowTxt, stl.stamp) + '</row>'); merges.push('A1:K1', 'L1:P1');
+        sd.push('<row r="2" ht="16" customHeight="1">' + cellXml(2, 0, '비용 단위: 천원 · 누계는 ' + label + '까지 · 월 상태: 진행 / 계획 외 진행 / 미진행(예정월이 지났는데 진행 표시·실적 없음) / 미입력(지난 달 예정월인데 아직 입력 전) / 예정(아직 오지 않은 달)' + (future ? ' · 아직 오지 않은 달이라 예정월 계획만 보입니다' : ''), stl.note) + '</row>'); merges.push('A2:P2');
+        var apTxt = '', subTxt = '';
+        if (info) {
+          var ap = info.approval; apTxt = '팀장 승인: ' + (ap ? ap.at.slice(0, 10) + (ap.changed ? ' (승인 뒤 수정됨)' : '') : (future ? '해당 없음' : '미승인'));
+          subTxt = '담당자 제출: ' + (info.owners || []).filter(function (o) { return !owner || o.name === owner; }).map(function (o) { return o.name + ' ' + (o.submitted ? '제출' + (o.at ? '(' + o.at.slice(5, 10) + ')' : '') : '미제출'); }).join(' · ');
+        }
+        sd.push('<row r="3" ht="18" customHeight="1">' + cellXml(3, 0, (apTxt ? apTxt + '   |   ' : '') + subTxt, stl.noteB) + '</row>'); merges.push('A3:P3');
+        sd.push('<row r="4" ht="30" customHeight="1">' + MCOLS.map(function (h, i) { return cellXml(4, i, h, stl.head); }).join('') + '</row>');
+        ri = 5;
+        var prevCs = '', prevCat = '';
+        P.forEach(function (p) {
+          var cnt = p.kinds['차수'] || p.kinds['건수'], ppl = p.kinds['인원'], cost = p.kinds['비용'], kpi = p.kinds['지표값'], txt = p.kinds['진행상황'];
+          var vC = cnt ? num(cnt.cells[8 + mi]) : null, vP = ppl ? num(ppl.cells[8 + mi]) : null, vK = cost ? won(num(cost.cells[8 + mi]), '비용') : null, vI = kpi ? num(kpi.cells[8 + mi]) : null;
+          var t = txt ? String(txt.cells[8 + mi] || '') : '', note = p.notes[mi] || '';
+          var mk = (p.marks && p.marks[mi]) || '', has = vC !== null || vP !== null || vK !== null || vI !== null || !!t;
+          var past = ym && curYm && ym < curYm, status = has ? (mk === 'extra' ? '계획 외 진행' : '진행') : mk === 'miss' ? '미진행' : mk === 'plan' ? (past ? '미입력' : '예정') : '';
+          var stFill = (status === '미진행' || status === '미입력') ? C.miss : status === '계획 외 진행' ? C.extra : (status === '진행' || status === '예정') ? C.plan : null;
+          var cat = p.c[0] + '|' + p.c[1], top = cat !== prevCs; prevCs = cat;
+          var o0 = { top: top, h: 'center', v: 'center', color: p.c[0] === prevCat && !top ? C.dim : C.ink }; prevCat = p.c[0];
+          var base = { top: top, v: 'center' };
+          var isKpiUnitPct = p.unit === '%';
+          var cells = [
+            cellXml(ri, 0, p.c[0], xf(o0)), cellXml(ri, 1, p.c[1], xf(Object.assign({ h: 'center' }, base, { color: top ? C.ink : C.dim }))),
+            cellXml(ri, 2, p.c[2], xf({ top: top, v: 'center', wrap: true, b: 1 })), cellXml(ri, 3, p.c[3], xf(Object.assign({ h: 'center' }, base))),
+            cellXml(ri, 4, status, xf({ top: top, h: 'center', v: 'center', fill: stFill, b: status === '진행' || status === '계획 외 진행' })),
+            cellXml(ri, 5, vC, xf(Object.assign({ h: 'right', num: vC !== null && vC % 1 ? '#,##0.###' : 'int' }, base))),
+            cellXml(ri, 6, vP, xf(Object.assign({ h: 'right', num: 'int' }, base))),
+            cellXml(ri, 7, vK, xf(Object.assign({ h: 'right', num: 'int' }, base))),
+            cellXml(ri, 8, vI, xf(Object.assign({ h: 'right', num: isKpiUnitPct ? '0.0"%"' : '#,##0.###' }, base))),
+            cellXml(ri, 9, cum(cnt, mi), xf(Object.assign({ h: 'right', num: 'int' }, base))),
+            cellXml(ri, 10, cum(ppl, mi), xf(Object.assign({ h: 'right', num: 'int' }, base))),
+            cellXml(ri, 11, won(cum(cost, mi), '비용'), xf(Object.assign({ h: 'right', num: 'int' }, base))),
+            cellXml(ri, 12, planOf(cnt, cnt && cnt.kind), xf(Object.assign({ h: 'right', num: 'int', color: C.ink2 }, base))),
+            cellXml(ri, 13, planOf(ppl, '인원'), xf(Object.assign({ h: 'right', num: 'int', color: C.ink2 }, base))),
+            cellXml(ri, 14, planOf(cost, '비용'), xf(Object.assign({ h: 'right', num: 'int', color: C.ink2 }, base))),
+            cellXml(ri, 15, (t + (note ? (t ? ' / ' : '') + '비고: ' + note : '')) || '', xf({ top: top, v: 'center', wrap: true, sz: 9, color: C.ink2 }))
+          ];
+          sd.push('<row r="' + ri + '">' + cells.join('') + '</row>'); ri++;
+        });
+        var lastP = ri - 1;
+        // 담당자별 소계·총계
+        ri++; sd.push('<row r="' + ri + '" ht="20" customHeight="1">' + cellXml(ri, 0, label + ' 담당자별 소계 · 총계', stl.sec) + '</row>'); merges.push('A' + ri + ':H' + ri); ri++;
+        sd.push('<row r="' + ri + '" ht="22" customHeight="1">' + MCOLS.map(function (h, i) { return cellXml(ri, i, i === 2 ? '구분' : i === 15 ? '' : h, stl.head); }).join('') + '</row>'); ri++;
+        function sumLine(label2, owner2, rowsOf, fill, bold) {
+          var by = {}; rowsOf.forEach(function (x) { by[x.kind] = x; });
+          var kinds = [['차수', '인원', '비용'], ['건수']];
+          kinds.forEach(function (grp) {
+            var xs = grp.map(function (k) { return by[k]; }); if (!xs.some(Boolean)) return;
+            var a = xs[0], b = grp.length > 1 ? xs[1] : null, c = grp.length > 1 ? xs[2] : null;
+            var o = { fill: fill, b: bold, top: 1 }, oc = Object.assign({ h: 'center' }, o), orr = Object.assign({ h: 'right', num: 'int' }, o);
+            var cells = [cellXml(ri, 0, '', xf(oc)), cellXml(ri, 1, '', xf(oc)), cellXml(ri, 2, label2 + (grp[0] === '건수' ? ' (건수)' : ''), xf(Object.assign({ v: 'center' }, o))), cellXml(ri, 3, owner2, xf(oc)), cellXml(ri, 4, '', xf(oc)),
+              cellXml(ri, 5, a ? num(a.cells[8 + mi]) : null, xf(orr)), cellXml(ri, 6, b ? num(b.cells[8 + mi]) : null, xf(orr)), cellXml(ri, 7, c ? won(num(c.cells[8 + mi]), '비용') : null, xf(orr)), cellXml(ri, 8, '', xf(oc)),
+              cellXml(ri, 9, cum(a, mi), xf(orr)), cellXml(ri, 10, cum(b, mi), xf(orr)), cellXml(ri, 11, c ? won(cum(c, mi), '비용') : null, xf(orr)),
+              cellXml(ri, 12, planOf(a, grp[0]), xf(orr)), cellXml(ri, 13, planOf(b, '인원'), xf(orr)), cellXml(ri, 14, planOf(c, '비용'), xf(orr)), cellXml(ri, 15, '', xf(oc))];
+            sd.push('<row r="' + ri + '">' + cells.join('') + '</row>'); ri++;
+          });
+        }
+        var owners = []; ownRows.forEach(function (x) { if (owners.indexOf(x.cells[3]) < 0) owners.push(x.cells[3]); });
+        owners.forEach(function (ow) { sumLine('담당자별 소계', ow, ownRows.filter(function (x) { return x.cells[3] === ow; }), C.owner, true); });
+        if (totRows.length) sumLine('총계', '전체', totRows, C.total, true);
+        var last = ri - 1;
+        var colsXml = '<cols>' + MW.map(function (w, i) { return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>'; }).join('') + '</cols>';
+        var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+          '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><dimension ref="A1:P' + last + '"/>' +
+          '<sheetViews><sheetView showGridLines="0" workbookViewId="0"><pane xSplit="4" ySplit="4" topLeftCell="E5" activePane="bottomRight" state="frozen"/><selection pane="topRight" activeCell="E1" sqref="E1"/><selection pane="bottomLeft" activeCell="A5" sqref="A5"/><selection pane="bottomRight" activeCell="E5" sqref="E5"/></sheetView></sheetViews>' +
+          '<sheetFormatPr defaultRowHeight="15"/>' + colsXml + '<sheetData>' + sd.join('') + '</sheetData>' +
+          '<autoFilter ref="A4:P' + Math.max(5, lastP) + '"/>' +
+          '<mergeCells count="' + merges.length + '">' + merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join('') + '</mergeCells>' +
+          '<pageMargins left="0.4" right="0.4" top="0.5" bottom="0.5" header="0.3" footer="0.3"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/>' +
+          '<headerFooter><oddFooter>&amp;C&amp;P / &amp;N</oddFooter></headerFooter></worksheet>';
+        MS.push({ name: sname, xml: xml, filt: '$A$4:$P$' + Math.max(5, lastP) });
+      });
+    })();
     var styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
       (nfs.length ? '<numFmts count="' + nfs.length + '">' + nfs.map(function (c, i) { return '<numFmt numFmtId="' + (164 + i) + '" formatCode="' + xesc(c) + '"/>'; }).join('') + '</numFmts>' : '') +
       '<fonts count="' + fonts.length + '">' + fonts.join('') + '</fonts><fills count="' + fills.length + '">' + fills.join('') + '</fills><borders count="' + borders.length + '">' + borders.join('') + '</borders>' +
@@ -4981,13 +5079,13 @@ var api = {
       '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
     var H = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
     var files = [
-      { name: '[Content_Types].xml', xml: H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+      { name: '[Content_Types].xml', xml: H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' + MS.map(function (m, i) { return '<Override PartName="/xl/worksheets/sheet' + (i + 2) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'; }).join('') + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
       { name: '_rels/.rels', xml: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
-      { name: 'xl/workbook.xml', xml: H + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="28800" windowHeight="15000"/></bookViews><sheets><sheet name="실적표" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">&apos;실적표&apos;!$3:$3</definedName></definedNames></workbook>' },
-      { name: 'xl/_rels/workbook.xml.rels', xml: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+      { name: 'xl/workbook.xml', xml: H + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="28800" windowHeight="15000"/></bookViews><sheets><sheet name="실적표" sheetId="1" r:id="rId1"/>' + MS.map(function (m, i) { return '<sheet name="' + xesc(m.name) + '" sheetId="' + (i + 2) + '" r:id="rId' + (i + 2) + '"/>'; }).join('') + '</sheets><definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">&apos;실적표&apos;!$3:$3</definedName>' + MS.map(function (m, i) { return '<definedName name="_xlnm.Print_Titles" localSheetId="' + (i + 1) + '">&apos;' + xesc(m.name) + '&apos;!$4:$4</definedName><definedName name="_xlnm._FilterDatabase" localSheetId="' + (i + 1) + '" hidden="1">&apos;' + xesc(m.name) + '&apos;!' + m.filt + '</definedName>'; }).join('') + '</definedNames></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', xml: H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' + MS.map(function (m, i) { return '<Relationship Id="rId' + (i + 2) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 2) + '.xml"/>'; }).join('') + '<Relationship Id="rId' + (MS.length + 2) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
       { name: 'xl/styles.xml', xml: styles },
       { name: 'xl/worksheets/sheet1.xml', xml: sheet }
-    ];
+    ].concat(MS.map(function (m, i) { return { name: 'xl/worksheets/sheet' + (i + 2) + '.xml', xml: m.xml }; }));
     return zipStore(files, enc);
   }
   var CRC_T = null;
@@ -5016,8 +5114,12 @@ var api = {
     return out;
   }
   function exportXlsx(r, rows, owner) {
+    var yms = (S.init && S.init.months) || [];
+    Promise.all(yms.map(function (ym) { return call('apiApprovalInfo', ym).catch(function () { return null; }); })).then(function (infos) { exportXlsx2(r, rows, owner, infos); });
+  }
+  function exportXlsx2(r, rows, owner, infos) {
     var bytes;
-    try { bytes = buildXlsx(r, rows, owner); } catch (e) { toast('엑셀 파일을 만들지 못했습니다: ' + e.message, true); return; }
+    try { bytes = buildXlsx(r, rows, owner, infos); } catch (e) { toast('엑셀 파일을 만들지 못했습니다: ' + e.message, true); return; }
     var stamp = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' }).slice(0, 10).replace(/-/g, '');
     var name = String(r.title || '교육팀 운영 실적').replace(/[\\\/:*?"<>|]/g, ' ').trim() + (owner ? '_' + owner : '') + '_' + stamp + '.xlsx';
     window.claude.use('downloads').then(function (dl) {
@@ -5180,7 +5282,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-12.21", last = 0, shown = false;
+  var APP_VER = "2026-10-14.1", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
