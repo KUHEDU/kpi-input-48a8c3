@@ -3757,13 +3757,13 @@ var api = {
   var SEAL_N = 0;
   function stampKey_(a) { return String(a.ym || '') + '|' + String(a.at || '') + '|' + (a.changed ? 1 : 0); }
   function stampSvg_(at, changed, ym, mode) {
-    var col = changed ? '#b7791f' : '#c0392b', md = String(at || '').slice(5, 10).replace('-', '.'), h = 0, sx = String(ym || at || ''), uid = 'sl' + (++SEAL_N);
+    var col = '#c0392b', md = String(at || '').slice(5, 10).replace('-', '.'), h = 0, sx = String(ym || at || ''), uid = 'sl' + (++SEAL_N);
     for (var i = 0; i < sx.length; i++) h = (h * 31 + sx.charCodeAt(i)) % 997;
     var ang = [-8, 5, -4, 7, -6, 3, -9, 6, -3, 8, -5, 4][h % 12], seed = h % 50 + 1, ff = "'Batang','바탕','Noto Serif KR','Malgun Gothic',serif";
     return '<svg class="seal' + (mode === 'big' ? ' big' : '') + '" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100" role="img" aria-label="팀장 승인 ' + md + '">' +
       '<defs><filter id="' + uid + 'f" x="-6%" y="-6%" width="112%" height="112%"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="' + seed + '" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.6"/></filter><clipPath id="' + uid + 'c"><circle cx="50" cy="50" r="38"/></clipPath></defs>' +
       '<g transform="rotate(' + ang + ' 50 50)" filter="url(#' + uid + 'f)" fill="none" stroke="' + col + '">' +
-      '<circle cx="50" cy="50" r="45.5" stroke-width="4.2"' + (changed ? ' stroke-dasharray="14 5"' : '') + '/><circle cx="50" cy="50" r="39" stroke-width="1.5"/>' +
+      '<circle cx="50" cy="50" r="45.5" stroke-width="4.2"' + '' + '/><circle cx="50" cy="50" r="39" stroke-width="1.5"/>' +
       '<g clip-path="url(#' + uid + 'c)"><line x1="0" y1="37" x2="100" y2="37" stroke-width="1.5"/><line x1="0" y1="66" x2="100" y2="66" stroke-width="1.5"/></g>' +
       '<g fill="' + col + '" stroke="' + col + '" stroke-width=".8" stroke-linejoin="round" font-family="' + ff + '" text-anchor="middle" font-weight="900"><text x="50" y="31" font-size="11.5">팀장</text><text x="50" y="59.5" font-size="27">승인' + (changed ? '*' : '') + '</text><text x="50" y="81" font-size="14.5">' + md + '</text></g></g></svg>';
   }
@@ -4963,7 +4963,7 @@ var api = {
           var ai = x.appr ? x.appr[i - 8] : null, on = !!(ai && ai.at);
           var stk = on ? stampKey_(ai) : '', img = !!(on && pngs && pngs[stk]);       // 도장 그림이 있으면 글자 대신 그림(칸은 비워 둔다)
           if (img) stamps.push({ col: i, row: 4 + ri, key: stk });
-          cells.push({ v: img ? '' : c, o: { fill: on ? (ai.changed ? C.extra : 'FFFBE3E0') : 'FFFFF3F0', b: on, color: on ? (ai.changed ? 'FF8A6100' : 'FFC0392B') : C.dim, h: 'center', v: 'center', wrap: true, sz: 9 }, txt: '' }); return;
+          cells.push({ v: img ? '' : c, o: { fill: on ? 'FFFBE3E0' : 'FFFFF3F0', b: on, color: on ? 'FFC0392B' : C.dim, h: 'center', v: 'center', wrap: true, sz: 9 }, txt: '' }); return;
         }
         var o = { fill: rowFill, b: bold, top: startP, h: 'left' }, v = c, shown;
         if (i < 4) {                                // 같은 항목이 이어지면 병합(위 칸에 합쳐진 칸은 같은 서식의 빈 칸)
@@ -5263,7 +5263,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.6", last = 0, shown = false;
+  var APP_VER = "2026-10-14.7", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
