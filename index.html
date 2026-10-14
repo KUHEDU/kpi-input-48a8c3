@@ -1743,6 +1743,8 @@ function projectRowKinds_(p) {
  * 반환 { title, header:[], rows:[{kind, section, cells:[], notes:[], pid, owner}] }
  * cells: [교육구분, 세부구분, 교육사업명, 담당자, 계획, 진행, 진행률, 구분, 월×12]
  */
+/** 월별 실적값 뒤에 붙는 단위: 차수 → 차수, 인원 → 명, 건수 → 건 (비용은 구분 칸의 천원 표기, 지표값은 % 표기·지표단위) */
+function unitOf_(x) { var k = x.kind; return k === '차수' ? '차수' : k === '인원' ? '명' : k === '건수' ? '건' : (k === '지표값' && x.unit && x.unit !== '%') ? x.unit : ''; }
 /** 실적표 「구분」 칸에 보이는 글자: 줄 종류 + 단위 (차수는 차수, 인원은 명, 건수는 건, 비용은 천원) */
 function kindLabel_(k, unit) { return k === '인원' ? '인원(명)' : k === '건수' ? '건수(건)' : k === '비용' ? '비용(천원)' : k === '지표값' ? (unit ? '지표값(' + unit + ')' : '지표값') : k; }
 function buildReportGrid_(projects, entries, config, viewer, systemsRows, curOverride) {
@@ -4826,7 +4828,7 @@ var api = {
         if (i === 7) return '<td class="fz c7" style="text-align:center">' + esc(c) + '</td>';
         var mk = x.marks ? x.marks[i - 8] : '', note = x.notes ? x.notes[i - 8] : '';
         if (x.kind === '진행상황') return '<td class="txt' + (mk ? ' m-' + mk : '') + '"' + (c ? ' title="' + esc(c) + '"' : '') + '>' + (c ? '<div class="tx">' + esc(c) + '</div>' : '') + '</td>';
-        var txt = typeof c === 'number' ? fmt(c) : c;
+        var txt = typeof c === 'number' ? fmt(c) + unitOf_(x) : c;
         return '<td class="n num' + (mk ? ' m-' + mk : '') + (note ? ' note' : '') + (typeof c === 'string' && c ? ' dim' : '') + '"' + (note ? ' title="' + esc(note) + '"' : '') + '>' + esc(txt) + '</td>';
       }).join('');
       return '<tr class="' + cls + (startP ? ' pstart' : '') + '">' + cells + '</tr>';
@@ -4947,7 +4949,7 @@ var api = {
           if (isTxt) { o.h = 'left'; o.v = 'center'; o.sz = 9; o.color = C.ink2; shown = c; }          // 월별 글: 칸마다 따로(병합 없음), 줄바꿈 없음 — 길면 옆의 빈 칸 위로 이어서 보인다
           else {
             o.h = 'right';
-            if (typeof c === 'number') { if (isKpi && x.unit === '%') o.num = '0.0"%"'; else if (isCost) { v = Math.round(c / 1000); o.num = 'int'; } else o.num = c % 1 === 0 ? 'int' : '#,##0.###'; shown = n(typeof v === 'number' ? v : c); }
+            if (typeof c === 'number') { var un = unitOf_(x); if (isKpi && x.unit === '%') o.num = '0.0"%"'; else if (isCost) { v = Math.round(c / 1000); o.num = 'int'; } else o.num = (c % 1 === 0 ? '#,##0' : '#,##0.###') + (un ? '"' + un + '"' : ''); shown = n(typeof v === 'number' ? v : c) + un; }
             else { shown = c; if (typeof c === 'string' && c) o.color = C.dim; }
           }
         }
@@ -5198,7 +5200,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.4", last = 0, shown = false;
+  var APP_VER = "2026-10-14.5", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
