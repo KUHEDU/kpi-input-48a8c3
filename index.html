@@ -5001,12 +5001,12 @@ var api = {
     // ── 시트 XML
     var sd = [], rIdx = 1;
     var st = { title: xf({ b: 1, sz: 14, color: C.brand, nb: 1 }), stamp: xf({ sz: 9, color: C.dim, h: 'right', nb: 1 }), note: xf({ sz: 9, color: C.ink2, nb: 1 }),
-      lg1: xf({ sz: 9, fill: C.plan, h: 'center', nb: 1 }), lg2: xf({ sz: 9, fill: C.miss, h: 'center', nb: 1 }), lg3: xf({ sz: 9, fill: C.extra, h: 'center', nb: 1 }),
+      lg1: xf({ sz: 9, fill: C.plan, h: 'center', v: 'center', wrap: true, nb: 1 }), lg2: xf({ sz: 9, fill: C.miss, h: 'center', v: 'center', wrap: true, nb: 1 }), lg3: xf({ sz: 9, fill: C.extra, h: 'center', v: 'center', wrap: true, nb: 1 }),
       head: xf({ b: 1, color: 'FFFFFFFF', fill: C.brand, h: 'center', wrap: true }) };
     var title = (r.title || '교육팀 운영 실적') + (owner ? ' · 담당자 ' + owner : '') + (suffix ? ' · ' + suffix : '');
     sd.push('<row r="1" ht="26" customHeight="1">' + cellXml(1, 0, title, st.title) + cellXml(1, 8, '출력 ' + nowTxt, st.stamp) + '</row>'); merges.push('A1:H1', 'I1:' + colName(NCOL - 1) + '1');
-    sd.push('<row r="2" ht="16" customHeight="1">' + cellXml(2, 0, '비용 단위: 천원 · ‘진행상황’ 줄 = 월별로 글로 적은 내용', st.note) + cellXml(2, 8, '예정월', st.lg1) + cellXml(2, 10, '미진행', st.lg2) + cellXml(2, 14, '계획 외 진행', st.lg3) + '</row>');
-    merges.push('A2:H2', 'I2:J2', 'K2:N2', 'O2:Q2');
+    sd.push('<row r="2" ht="26" customHeight="1">' + cellXml(2, 0, '비용 단위: 천원 · ‘진행상황’ 줄 = 월별로 글로 적은 내용', st.note) + cellXml(2, NCOL - 3, '예정월', st.lg1) + cellXml(2, NCOL - 2, '미진행', st.lg2) + cellXml(2, NCOL - 1, '계획 외 진행', st.lg3) + '</row>');
+    merges.push('A2:' + colName(NCOL - 4) + '2');
     sd.push('<row r="3" ht="22" customHeight="1">' + r.header.map(function (h, i) { return cellXml(3, i, h, st.head); }).join('') + '</row>');
     rIdx = 4;
     body.forEach(function (b) {
@@ -5263,7 +5263,7 @@ var api = {
 <script>
 // 웹 배포본: 새 버전이 올라오면 알려 준다 (열어 둔 화면이 옛 버전으로 남지 않게). 강제로 새로고침하지는 않는다.
 (function () {
-  var APP_VER = "2026-10-14.8", last = 0, shown = false;
+  var APP_VER = "2026-10-14.9", last = 0, shown = false;
   function show() {
     if (shown) return; shown = true;
     var b = document.createElement('div'); b.id = 'newVer'; b.setAttribute('role', 'status');
